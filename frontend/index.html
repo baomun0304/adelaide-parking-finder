@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Adelaide Parking Finder</title>
+<meta name="description" content="Every on-street parking bay in the Adelaide CBD on one map: free, ticketed, unrestricted, motorcycle, disabled and loading zones, and what applies right now.">
+<meta name="theme-color" content="#f3efe6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#151513" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='4' y='4' width='56' height='56' rx='10' fill='%23fff' stroke='%230f7a3d' stroke-width='5'/%3E%3Ctext x='32' y='46' font-family='Arial' font-weight='700' font-size='38' text-anchor='middle' fill='%230f7a3d'%3EP%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Overpass:wght@700;800;900&display=swap" rel="stylesheet">
+<script>
+  window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+</script>
+<script defer src="/_vercel/insights/script.js"></script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="map" aria-label="Map of parking bays"></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-plate" aria-hidden="true">P</span>
+    <span class="brand-text"><b>Adelaide</b> Parking Finder</span>
+  </div>
+  <div id="banner" class="banner" role="status" hidden></div>
+</header>
+
+<nav class="tools" aria-label="Map tools">
+  <button id="locate-btn" class="tool" title="Show my location" aria-label="Show my location">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><circle cx="12" cy="12" r="7.5" fill="none"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3" fill="none"/></svg>
+  </button>
+  <button id="follow-btn" class="tool" title="Follow me while driving" aria-label="Follow me" aria-pressed="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 19.5 21 12 16.8 4.5 21z"/></svg>
+  </button>
+  <button id="theme-btn" class="tool" title="Light or dark map" aria-label="Switch light or dark map">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/></svg>
+  </button>
+</nav>
+
+<div class="dock">
+  <button id="free-btn" class="pill" aria-pressed="false">
+    <span class="switch" aria-hidden="true"></span>
+    <span class="pill-text"><b>Free now</b><small id="clock">&nbsp;</small></span>
+  </button>
+  <button id="key-btn" class="pill pill-small" aria-label="What the signs mean">Key</button>
+</div>
+
+<section id="sheet" class="sheet" aria-live="polite" hidden>
+  <button class="sheet-close" aria-label="Close">&times;</button>
+  <div id="sheet-body"></div>
+</section>
+
+<template id="key-template">
+  <h2 class="sheet-title">Reading the map</h2>
+  <p class="sheet-lead">Each tag is a small copy of the sign on the pole. The number is the time limit, so <b>2P</b> means 2 hours.</p>
+  <ul class="key">
+    <li><span class="pin pin-free">2P</span><span><b>Free, time limited</b><br>Park for free up to the limit while the sign applies.</span></li>
+    <li><span class="pin pin-ticket">2P<i>$</i></span><span><b>Ticket</b><br>Pay at the machine or in an app while the sign applies.</span></li>
+    <li><span class="pin pin-unrestricted">&#8734;</span><span><b>Unrestricted</b><br>No time limit, no ticket.</span></li>
+    <li><span class="pin pin-special">&#9855;</span><span><b>Disabled permit</b></span></li>
+    <li><span class="pin pin-special">MC</span><span><b>Motorcycles only</b></span></li>
+    <li><span class="pin pin-special">RES</span><span><b>Residents with a permit</b></span></li>
+    <li><span class="pin pin-stop">LZ</span><span><b>Loading zone</b><br>Commercial vehicles loading, not for parking.</span></li>
+    <li><span class="pin pin-stop">TAXI</span><span><b>Taxi rank</b></span></li>
+    <li><span class="pin pin-stop">NP</span><span><b>No parking</b></span></li>
+  </ul>
+  <p class="fine">Outside the hours on a sign, the bay usually has no limit. Public holidays and event days can be different, and signs change. The sign on the street always wins.</p>
+  <p class="fine" id="data-credit">Parking data: City of Adelaide, CC BY 4.0. Map: Esri, OpenStreetMap contributors.</p>
+</template>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

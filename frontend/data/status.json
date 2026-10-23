@@ -1,0 +1,9 @@
+{
+  "ok": false,
+  "since": "2026-10-23T13:58:55+00:00",
+  "data_updated": null,
+  "bays": 0,
+  "failed_layers": 34,
+  "error": "403 Client Error: Forbidden",
+  "unreadable_hours": 0
+}
