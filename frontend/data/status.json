@@ -1,9 +1,9 @@
 {
-  "ok": true,
-  "since": "2026-10-30T21:42:58+00:00",
+  "ok": false,
+  "since": "2026-11-01T21:24:06+00:00",
   "data_updated": "2026-10-30T21:42:58+00:00",
   "bays": 5929,
-  "failed_layers": 0,
-  "error": null,
+  "failed_layers": 33,
+  "error": "Error performing query operation",
   "unreadable_hours": 20
 }
