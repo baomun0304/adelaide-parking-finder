@@ -4,6 +4,6 @@
   "data_updated": "2026-10-30T21:42:58+00:00",
   "bays": 5929,
   "failed_layers": 33,
-  "error": "Error performing query operation",
+  "error": "Unable to complete operation.",
   "unreadable_hours": 20
 }
