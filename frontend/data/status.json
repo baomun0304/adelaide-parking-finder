@@ -1,9 +1,9 @@
 {
   "ok": true,
   "since": "2026-11-05T22:56:49+00:00",
-  "data_updated": "2026-11-05T22:56:49+00:00",
+  "data_updated": "2026-11-06T22:26:55+00:00",
   "bays": 5929,
   "failed_layers": 0,
   "error": null,
-  "unreadable_hours": 15
+  "unreadable_hours": 16
 }
