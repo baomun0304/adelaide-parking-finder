@@ -2,236 +2,483 @@
 
 const ADELAIDE = [-34.9265, 138.6010];
 const THEME_KEY = "apf_theme";
+const VEHICLE_KEY = "apf_vehicle";
+const REPO = "https://github.com/baomun0304/adelaide-parking-finder";
+const STALE_DAYS = 3;
 const TILES = {
   light: ["World_Light_Gray_Base", "World_Light_Gray_Reference"],
   dark: ["World_Dark_Gray_Base", "World_Dark_Gray_Reference"],
 };
 const tileUrl = (name) => `https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/${name}/MapServer/tile/{z}/{y}/{x}`;
-const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const NEEDS = [[0, "Any"], [30, "30 min"], [60, "1 hr"], [120, "2 hr"], [180, "3 hr"], [240, "4 hr"], [600, "All day"]];
+const VEHICLES = [["car", "Car"], ["moto", "Motorbike"], ["disabled", "Disability permit"]];
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode: the page still works */ } },
+};
+const dateText = (iso, opts) => new Date(iso).toLocaleDateString("en-AU", { timeZone: "Australia/Adelaide", ...opts });
+const nf = new Intl.NumberFormat("en-AU");
 
 // ---------- map and theme ----------
 
 const map = L.map("map", { zoomControl: false, minZoom: 12, maxZoom: 18 }).setView(ADELAIDE, 15);
 map.attributionControl.setPrefix(false);
-const base = L.tileLayer(tileUrl(TILES.light[0]), { maxZoom: 18, maxNativeZoom: 16, attribution: "Esri, HERE, Garmin, &copy; OpenStreetMap contributors" }).addTo(map);
-const labels = L.tileLayer(tileUrl(TILES.light[1]), { maxZoom: 18, maxNativeZoom: 16 }).addTo(map);
 
-function savedTheme() {
-  try { return localStorage.getItem(THEME_KEY); } catch { return null; }
+function tileLayers(theme) {
+  const base = { maxZoom: 18, maxNativeZoom: 16, crossOrigin: true }; // CORS lets the service worker keep tiles for offline
+  return [
+    L.tileLayer(tileUrl(TILES[theme][0]), { ...base, attribution: "Esri, HERE, Garmin, &copy; OpenStreetMap contributors" }),
+    L.tileLayer(tileUrl(TILES[theme][1]), base),
+  ];
 }
-function activeTheme() {
-  return savedTheme() || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-}
+
+const systemDark = matchMedia("(prefers-color-scheme: dark)");
+const activeTheme = () => store.get(THEME_KEY) || (systemDark.matches ? "dark" : "light");
+let shownTheme = activeTheme();
+document.documentElement.dataset.theme = shownTheme;
+let tiles = tileLayers(shownTheme);
+tiles.forEach((l) => l.addTo(map));
+
+// The new tiles load on top of the old ones, and the old ones go only once the new ones are in,
+// so switching never shows a half-and-half map.
 function applyTheme(theme, remember) {
+  if (remember) store.set(THEME_KEY, theme);
+  if (theme === shownTheme) return;
+  const old = tiles;
+  shownTheme = theme;
   document.documentElement.dataset.theme = theme;
-  base.setUrl(tileUrl(TILES[theme][0]));
-  labels.setUrl(tileUrl(TILES[theme][1]));
-  if (remember) try { localStorage.setItem(THEME_KEY, theme); } catch {}
+  tiles = tileLayers(theme);
+  tiles.forEach((l) => l.addTo(map));
+  tiles[0].once("load", () => old.forEach((l) => map.removeLayer(l)));
 }
-applyTheme(activeTheme(), false);
-$("theme-btn").onclick = () => applyTheme(activeTheme() === "dark" ? "light" : "dark", true);
+$("theme-btn").onclick = () => applyTheme(shownTheme === "dark" ? "light" : "dark", true);
+systemDark.addEventListener?.("change", () => { if (!store.get(THEME_KEY)) applyTheme(activeTheme(), false); });
 
-// ---------- reading a bay ----------
+// ---------- state ----------
 
-function stayLabel(minutes) {
-  if (!minutes) return "";
-  return { 15: "¼P", 30: "½P" }[minutes] || `${minutes / 60}P`;
-}
+let bays = [];
+let matched = [];
+let feed = null;
+let loadFailed = false;
+const filters = { ...Logic.DEFAULT_FILTERS, vehicle: store.get(VEHICLE_KEY) || "car" };
+if (!VEHICLES.some(([v]) => v === filters.vehicle)) filters.vehicle = "car";
 
-function stayWords(minutes) {
-  if (minutes < 60) return `${minutes} min`;
-  const h = minutes / 60;
-  return `${h} hour${h === 1 ? "" : "s"}`;
-}
+const moment = () => filters.later || Logic.adelaideNow();
 
-function clockText(minutes) {
-  if (minutes === 1440 || minutes === 0) return "midnight";
-  if (minutes === 720) return "noon";
-  const h = Math.floor(minutes / 60), m = minutes % 60;
-  return `${h % 12 || 12}${m ? ":" + String(m).padStart(2, "0") : ""}${h < 12 ? "am" : "pm"}`;
-}
-
-function daysText(days) {
-  if (days.length === 7) return "Daily";
-  const runs = [];
-  for (const d of days) {
-    const last = runs[runs.length - 1];
-    if (last && d === last[1] + 1) last[1] = d; else runs.push([d, d]);
-  }
-  return runs.map(([a, b]) => a === b ? DAY_NAMES[a] : `${DAY_NAMES[a]}${b - a > 1 ? "-" : ", "}${DAY_NAMES[b]}`).join(", ");
-}
-
-// What applies to this bay at this moment. Everything the driver reads comes from here.
-function rightNow(p, now = new Date()) {
-  const fixed = {
-    unrestricted: ["ok", "No time limit", "Park as long as you like."],
-    "no-parking": ["no", "No parking", "Not a place to leave the car."],
-    loading: ["no", "Loading zone", "For vehicles loading or unloading, not parking."],
-    taxi: ["no", "Taxi rank", "Taxis only."],
-    disabled: ["special", "Disabled permit only", "Needs a valid disability parking permit on display."],
-    residential: ["special", "Residents with a permit", "Other drivers may be fined."],
-    motorcycle: ["special", "Motorcycles only", "No cars."],
-  }[p.category];
-  if (fixed) return { tone: fixed[0], head: fixed[1], sub: fixed[2], blocksFree: fixed[0] === "no" };
-
-  if (!p.windows) {
-    return { tone: "special", head: "Check the sign", sub: "We couldn't read this sign's hours for sure.", unknown: true };
-  }
-  const day = (now.getDay() + 6) % 7;
-  const mins = now.getHours() * 60 + now.getMinutes();
-  const today = p.windows.filter((w) => w[0].includes(day));
-  const active = today.find((w) => mins >= w[1] && mins < w[2]);
-  const limit = stayWords(p.max_stay);
-
-  if (active) {
-    const until = `until ${clockText(active[2])}`;
-    return p.category === "ticket"
-      ? { tone: "paid", head: `Ticket, ${limit} max`, sub: `Pay at the machine or in an app, ${until}.`, blocksFree: true }
-      : { tone: "ok", head: `Free for ${limit}`, sub: `Time limit applies ${until}.` };
-  }
-  const next = today.filter((w) => w[1] > mins).sort((a, b) => a[1] - b[1])[0];
-  return {
-    tone: "ok",
-    head: "No limit right now",
-    sub: next
-      ? `${p.category === "ticket" ? "Ticket" : limit + " limit"} starts at ${clockText(next[1])}.`
-      : today.length ? "The sign's hours are over for today." : "This sign doesn't apply today.",
-  };
-}
-
-// ---------- markers ----------
+// ---------- markers: only what is on screen is ever in the page ----------
 
 function pinHtml(p) {
   const label = {
     unrestricted: "&#8734;", disabled: "&#9855;", motorcycle: "MC", residential: "RES",
     loading: "LZ", taxi: "TAXI", "no-parking": "NP",
-  }[p.category] || stayLabel(p.max_stay);
+  }[p.category] || Logic.stayLabel(p.max_stay);
   const kind = { free: "free", ticket: "ticket", unrestricted: "unrestricted",
     disabled: "special", motorcycle: "special", residential: "special" }[p.category] || "stop";
   const unknown = (p.category === "free" || p.category === "ticket") && !p.windows ? " pin-unknown" : "";
   return `<span class="pin pin-${kind}${unknown}">${label}${kind === "ticket" ? "<i></i>" : ""}</span>`;
 }
 
-const cluster = L.markerClusterGroup({
-  maxClusterRadius: (zoom) => (zoom >= 17 ? 28 : 55),
-  disableClusteringAtZoom: 17,
-  showCoverageOnHover: false,
-  spiderfyOnMaxZoom: false,
-  iconCreateFunction(c) {
-    const kids = c.getAllChildMarkers();
-    const tickets = kids.filter((m) => m.bay.category === "ticket").length;
-    const size = kids.length > 99 ? 48 : 40;
-    return L.divIcon({
-      html: `<div class="cluster${tickets > kids.length / 2 ? " mostly-ticket" : ""}">${kids.length}</div>`,
-      className: "", iconSize: [size, size],
-    });
-  },
-}).addTo(map);
+const WORDS = {
+  free: "Free time-limited bay", ticket: "Ticket bay", unrestricted: "Unrestricted bay", motorcycle: "Motorcycle bay",
+  disabled: "Disabled permit bay", residential: "Residents permit bay", taxi: "Taxi rank", loading: "Loading zone", "no-parking": "No parking zone",
+};
+const bayLabel = (b) => `${WORDS[b.category]}${b.max_stay ? `, ${Logic.stayWords(b.max_stay)}` : ""}. ${b.hours_text || "Check the sign"}. Press Enter for details.`;
 
-let markers = [];
+const layer = L.layerGroup().addTo(map);
+const live = new Map(); // key -> marker currently on the map
+let index = null;
 let picked = null;
 
-function buildMarkers(geojson) {
-  markers = geojson.features.map((f) => {
-    const [lng, lat] = f.geometry.coordinates;
-    const m = L.marker([lat, lng], {
-      icon: L.divIcon({ html: pinHtml(f.properties), className: "pin-wrap", iconSize: [44, 26], iconAnchor: [22, 13] }),
-      keyboard: true,
-      title: f.properties.hours_text || f.properties.category,
-    });
-    m.bay = f.properties;
-    m.on("click", () => openBay(m));
-    return m;
+function bayMarker(b) {
+  const [k, n] = b.dup;
+  const shift = (k - (n - 1) / 2) * 50; // bays that share a spot fan out side by side at full zoom
+  const m = L.marker([b.lat, b.lng], {
+    icon: L.divIcon({ html: pinHtml(b), className: "pin-wrap", iconSize: [44, 26], iconAnchor: [22 - shift, 13] }),
+    title: bayLabel(b),
   });
+  m.on("add", () => m.getElement().setAttribute("aria-label", bayLabel(b)));
+  m.on("click", () => openBay(b, m.getElement()));
+  return m;
 }
 
-let freeOnly = false;
-
-function refreshMarkers() {
-  const now = new Date();
-  const shown = freeOnly ? markers.filter((m) => !rightNow(m.bay, now).blocksFree) : markers;
-  cluster.clearLayers();
-  cluster.addLayers(shown);
+function clusterMarker(c) {
+  const [lng, lat] = c.geometry.coordinates;
+  const { cluster_id: id, point_count: n, t } = c.properties;
+  const size = n > 99 ? 48 : 40;
+  const label = `${nf.format(n)} bays here. Press Enter to zoom in.`;
+  const m = L.marker([lat, lng], {
+    icon: L.divIcon({ html: `<div class="cluster${t > n / 2 ? " mostly-ticket" : ""}">${nf.format(n)}</div>`, className: "", iconSize: [size, size] }),
+    title: label,
+  });
+  m.on("add", () => m.getElement().setAttribute("aria-label", label));
+  m.on("click", () => map.setView([lat, lng], Math.min(index.getClusterExpansionZoom(id), 18)));
+  return m;
 }
+
+function render() {
+  if (!index) return;
+  const b = map.getBounds().pad(0.25);
+  const zoom = Math.min(Math.round(map.getZoom()), 18);
+  const keep = new Set();
+  for (const item of index.getClusters([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], zoom)) {
+    const isCluster = item.properties.cluster;
+    const key = isCluster ? `c${item.properties.cluster_id}` : `b${item.properties.i}`;
+    keep.add(key);
+    if (live.has(key)) continue;
+    const m = isCluster ? clusterMarker(item) : bayMarker(bays[item.properties.i]);
+    live.set(key, m);
+    layer.addLayer(m);
+  }
+  for (const [key, m] of live) {
+    if (!keep.has(key)) { layer.removeLayer(m); live.delete(key); }
+  }
+  markPicked();
+}
+
+function markPicked() {
+  for (const m of live.values()) m._icon?.classList.remove("pin-picked");
+  if (picked != null) live.get(`b${picked}`)?._icon?.classList.add("pin-picked");
+}
+
+let frame = 0;
+map.on("moveend", () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(render); });
+
+function applyFilters() {
+  const m = moment();
+  matched = Logic.isFiltering(filters) ? bays.filter((b) => Logic.matches(b, filters, m)) : bays;
+  index = new Supercluster({ radius: 50, extent: 256, maxZoom: 17, minPoints: 2, map: (p) => ({ t: p.t }), reduce: (a, p) => { a.t += p.t; } });
+  index.load(matched.map((b) => b.pt));
+  layer.clearLayers();
+  live.clear();
+  render();
+  updateChrome();
+}
+
+// ---------- chips, status line ----------
+
+const activeCount = () => [filters.free, filters.need > 0, filters.later, filters.vehicle !== "car", filters.sureOnly].filter(Boolean).length;
+
+function updateChrome() {
+  const filtering = Logic.isFiltering(filters);
+  $("chip-free").setAttribute("aria-pressed", filters.free);
+  $("chip-free").textContent = filters.later ? "Free" : "Free now";
+  for (const c of document.querySelectorAll(".chip[data-need]")) c.setAttribute("aria-pressed", filters.need === Number(c.dataset.need));
+  const n = activeCount();
+  $("chip-badge").hidden = !n;
+  $("chip-badge").textContent = n;
+  $("chip-more").classList.toggle("on", n > 0 && !filters.free && !filters.need);
+
+  const when = filters.later ? `For ${Logic.momentLabel(filters.later)}` : `Now, ${Logic.momentLabel(moment())}`;
+  const main = !bays.length ? (loadFailed ? "Couldn't load the bays" : "Loading bays...")
+    : !filtering ? `All ${nf.format(bays.length)} bays`
+    : matched.length ? `${nf.format(matched.length)} of ${nf.format(bays.length)} bays match`
+    : "No bays match. Try fewer filters.";
+  const fresh = feed?.checked ? ` &middot; data checked ${esc(dateText(feed.checked, { day: "numeric", month: "short" }))}` : "";
+  const html = `<span class="status-main">${esc(main)}</span>
+    <span class="status-sub">${esc(when)} (Adelaide)${fresh}</span>
+    <span class="status-actions">${filtering ? '<button type="button" data-act="reset">Reset</button>' : ""}${filters.later ? '<button type="button" data-act="now">Back to now</button>' : ""}</span>`;
+  if ($("status").dataset.html !== html) { $("status").innerHTML = html; $("status").dataset.html = html; }
+  if (sheetKind === "filters") syncFilterSheet();
+}
+
+$("status").addEventListener("click", (e) => {
+  const act = e.target.closest("button")?.dataset.act;
+  if (act === "reset") resetFilters();
+  if (act === "now") setFilter({ later: null });
+});
+
+function setFilter(change) {
+  Object.assign(filters, change);
+  if ("vehicle" in change) store.set(VEHICLE_KEY, filters.vehicle);
+  applyFilters();
+}
+function resetFilters() { setFilter({ ...Logic.DEFAULT_FILTERS, vehicle: "car" }); }
+
+$("chip-free").onclick = () => setFilter({ free: !filters.free });
+for (const c of document.querySelectorAll(".chip[data-need]")) {
+  c.onclick = () => setFilter({ need: filters.need === Number(c.dataset.need) ? 0 : Number(c.dataset.need) });
+}
+$("chip-more").onclick = () => openFilters();
 
 // ---------- the sheet ----------
 
 const sheet = $("sheet");
 const sheetBody = $("sheet-body");
+let sheetKind = null;
+let opener = null;
 
-function openSheet(html) {
+function openSheet(kind, html, { focus = true, from = null } = {}) {
+  const wasOpen = !sheet.hidden && !sheet.classList.contains("closing");
+  sheetKind = kind;
   sheetBody.innerHTML = html;
-  if (!sheet.hidden && !sheet.classList.contains("closing")) return;
-  sheet.hidden = false;
-  sheet.classList.add("closing");
-  requestAnimationFrame(() => requestAnimationFrame(() => sheet.classList.remove("closing")));
+  if (from) opener = from;
+  if (!wasOpen) {
+    sheet.hidden = false;
+    sheet.classList.add("closing");
+    requestAnimationFrame(() => requestAnimationFrame(() => sheet.classList.remove("closing")));
+  }
+  if (focus) sheet.querySelector(".sheet-close").focus({ preventScroll: true });
 }
 
 function closeSheet() {
   if (sheet.hidden) return;
   sheet.classList.add("closing");
+  sheetKind = null;
   setTimeout(() => { if (sheet.classList.contains("closing")) sheet.hidden = true; }, 300);
-  if (picked) { picked._icon?.classList.remove("pin-picked"); picked = null; }
+  picked = null;
+  markPicked();
+  if (opener && document.contains(opener)) opener.focus({ preventScroll: true });
+  opener = null;
 }
+
+sheet.querySelector(".sheet-close").onclick = closeSheet;
+map.on("click", closeSheet);
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (!$("search-results").hidden) hideResults(); else closeSheet();
+});
+
+// ---------- a bay ----------
 
 function plateHtml(p) {
   const cls = { free: "", ticket: "ticket", unrestricted: "unrestricted", disabled: "special",
     motorcycle: "special", residential: "special" }[p.category] ?? "stop";
   const big = { unrestricted: "&#8734;", disabled: "&#9855;", motorcycle: "MC", residential: "P",
-    loading: "LZ", taxi: "TAXI", "no-parking": "NP" }[p.category] || stayLabel(p.max_stay);
+    loading: "LZ", taxi: "TAXI", "no-parking": "NP" }[p.category] || Logic.stayLabel(p.max_stay);
   const word = { ticket: "Ticket", free: "", unrestricted: "No limit", residential: "Permit",
     loading: "Loading", taxi: "Zone", "no-parking": "", disabled: "Permit", motorcycle: "Only" }[p.category];
-  const hours = (p.windows || []).map((w) => `${clockText(w[1])}-${clockText(w[2])}<br>${daysText(w[0])}`).join("<br>");
+  const wins = (p.windows || []).slice(0, 3);
+  const mixed = new Set(wins.map((w) => w[3])).size > 1; // different limits on different days: name each one
+  const hours = wins.map((w) => `${mixed ? `${Logic.stayLabel(w[3])} ` : ""}${Logic.clockText(w[1])}-${Logic.clockText(w[2])}<br>${Logic.daysText(w[0])}`).join("<br>");
   return `<div class="plate ${cls}"><div class="plate-big">${big}</div>${word ? `<div class="plate-word">${word}</div>` : ""}${hours ? `<div class="plate-hours">${hours}</div>` : ""}</div>`;
 }
 
-function openBay(marker) {
-  if (picked) picked._icon?.classList.remove("pin-picked");
-  picked = marker;
-  marker._icon?.classList.add("pin-picked");
-  const p = marker.bay;
-  const now = rightNow(p);
+const isApple = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+function directionsHtml(b) {
+  const g = `https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lng}&travelmode=driving`;
+  const a = `https://maps.apple.com/?daddr=${b.lat},${b.lng}&dirflg=d`;
+  return `<div class="actions"><a class="btn primary" href="${g}" target="_blank" rel="noopener">Directions in Google Maps</a>${isApple ? `<a class="btn" href="${a}" target="_blank" rel="noopener">Apple Maps</a>` : ""}</div>`;
+}
+
+function closedLines(b) {
+  const seen = new Map();
+  for (const [days, start, end, label] of b.closed || []) {
+    const k = `${label} ${Logic.daysText(days)} ${Logic.clockText(start)} to ${Logic.clockText(end)}`;
+    seen.set(k, true);
+  }
+  return [...seen.keys()].slice(0, 4).join("; ") + (seen.size > 4 ? "; more on the sign" : "");
+}
+
+function openBay(b, from, quiet = false) {
+  picked = b.i;
+  markPicked();
+  const m = moment();
+  const d = Logic.describe(b, m, !filters.later);
   const facts = [
-    ["Sign says", p.hours_text],
-    ["Spaces", p.spaces > 0 ? p.spaces : null],
-    ["Parking angle", p.angle && /^\d+$/.test(p.angle) ? `${p.angle}°` : p.angle],
-    ["Exemptions", p.exemptions],
+    ["Sign says", b.hours_text],
+    ["Not allowed", closedLines(b)],
+    ["Spaces", b.spaces > 0 ? b.spaces : null],
+    ["Parking angle", b.angle && /^\d+$/.test(b.angle) ? `${b.angle}°` : b.angle],
+    ["Exemptions", b.exemptions],
   ].filter(([, v]) => v != null && v !== "");
-  openSheet(`
-    <div class="bay tone-${now.tone}">
-      ${plateHtml(p)}
-      <div><p class="verdict">${esc(now.head)}</p><p class="verdict-sub">${esc(now.sub)}</p></div>
+  openSheet("bay", `
+    <h2 id="sheet-title" class="sr-only">Parking bay details</h2>
+    <div class="bay tone-${d.tone}">
+      ${plateHtml(b)}
+      <div><p class="verdict">${esc(d.head)}</p><p class="verdict-sub">${esc(d.sub)}</p>${d.note ? `<p class="verdict-note">${esc(d.note)}</p>` : ""}</div>
     </div>
+    ${filters.later ? `<p class="when-note">Showing ${esc(Logic.momentLabel(m))}, Adelaide time.</p>` : ""}
+    ${directionsHtml(b)}
     <ul class="facts">${facts.map(([k, v]) => `<li><span>${k}</span><span>${esc(v)}</span></li>`).join("")}</ul>
-    <p class="fine">Always read the sign at the bay too. Event days, works and public holidays can change the rules.</p>`);
+    <p class="fine">Always read the sign at the bay too. Event days, works and public holidays can change the rules.</p>`,
+  { focus: !quiet, from });
 }
 
-sheet.querySelector(".sheet-close").onclick = closeSheet;
-map.on("click", closeSheet);
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet(); });
+// ---------- key and about ----------
 
-$("key-btn").onclick = () => openSheet($("key-template").innerHTML);
-
-// ---------- free now ----------
-
-function tickClock() {
-  const now = new Date();
-  $("clock").textContent = `${DAY_NAMES[(now.getDay() + 6) % 7]} ${clockText(now.getHours() * 60 + now.getMinutes())}`;
+function aboutHtml() {
+  const timed = feed?.timed_bays, bad = feed?.unreadable_bays;
+  const readable = timed ? Math.round(((timed - bad) / timed) * 100) : null;
+  const updated = feed?.data_updated ? dateText(feed.data_updated, { day: "numeric", month: "short", year: "numeric" }) : null;
+  const checked = feed?.checked ? dateText(feed.checked, { day: "numeric", month: "short", year: "numeric" }) : null;
+  return `
+  <h2 id="sheet-title" class="sheet-title">Reading the map</h2>
+  <p class="sheet-lead">Each tag is a small copy of the sign on the pole. The number is the time limit, so <b>2P</b> means 2 hours.</p>
+  <ul class="key">
+    <li><span class="pin pin-free">2P</span><span><b>Free, time limited</b><br>Park for free up to the limit while the sign applies.</span></li>
+    <li><span class="pin pin-ticket">2P<i></i></span><span><b>Ticket</b><br>Pay at the machine or in an app while the sign applies.</span></li>
+    <li><span class="pin pin-unrestricted">&#8734;</span><span><b>Unrestricted</b><br>No time limit, no ticket.</span></li>
+    <li><span class="pin pin-special">&#9855;</span><span><b>Disabled permit</b></span></li>
+    <li><span class="pin pin-special">MC</span><span><b>Motorcycles only</b></span></li>
+    <li><span class="pin pin-special">RES</span><span><b>Residents with a permit</b></span></li>
+    <li><span class="pin pin-stop">LZ</span><span><b>Loading zone</b><br>Commercial vehicles loading, not for parking.</span></li>
+    <li><span class="pin pin-stop">TAXI</span><span><b>Taxi rank</b></span></li>
+    <li><span class="pin pin-stop">NP</span><span><b>No parking</b></span></li>
+    <li><span class="pin pin-free pin-unknown">2P</span><span><b>Check the sign</b><br>The council's data has no readable hours for this bay.</span></li>
+  </ul>
+  <h3 class="sheet-sub">About the data</h3>
+  <ul class="about">
+    <li><b>Free</b> means no payment. It does not mean there is an empty space. We have no live availability.</li>
+    <li>Rules are in <b>Adelaide time</b>, whatever time your phone says.</li>
+    <li>Outside the hours on a sign, a bay usually has no limit. Public holidays and event days can be different, and signs change. The sign on the street always wins.</li>
+    ${readable != null ? `<li>We can read the hours on <b>${readable}%</b> of the ${nf.format(timed)} free and ticket bays. The rest say "Check the sign" instead of guessing.</li>` : ""}
+    ${checked ? `<li>Data checked ${esc(checked)}${updated ? `, last changed ${esc(updated)}` : ""}. It updates once a day.</li>` : ""}
+    <li>Your location stays on your phone. Search sends what you type to OpenStreetMap's Nominatim service.</li>
+  </ul>
+  <p class="fine">Parking data: City of Adelaide, CC BY 4.0. Map: Esri, OpenStreetMap contributors. An independent project, not affiliated with the council. <a href="${REPO}/issues" target="_blank" rel="noopener">Report a wrong bay</a>.</p>`;
 }
-tickClock();
+$("key-btn").onclick = (e) => openSheet("key", aboutHtml(), { from: e.currentTarget });
+
+// ---------- filters sheet ----------
+
+function optGroup(title, name, options, hint = "") {
+  return `<fieldset class="fgroup"><legend>${title}</legend><div class="opts">${options.map(([v, label]) =>
+    `<button type="button" class="opt" data-set="${name}" data-v="${v}" aria-pressed="false">${label}</button>`).join("")}</div>${hint}</fieldset>`;
+}
+
+function dayOptions() {
+  const today = Logic.adelaideNow().day;
+  return [0, 1, 2, 3, 4, 5, 6].map((i) => {
+    const label = i === 0 ? "Today" : i === 1 ? "Tomorrow" : dateText(Date.now() + i * 864e5, { weekday: "short", day: "numeric", month: "short" });
+    return `<option value="${(today + i) % 7}">${label}</option>`;
+  }).join("");
+}
+
+function openFilters(from) {
+  openSheet("filters", `
+    <h2 id="sheet-title" class="sheet-title">Filters</h2>
+    <p class="sheet-lead">Pick what matters. The map updates as you tap.</p>
+    ${optGroup("When are you parking?", "when", [["now", "Now"], ["later", "Later"]])}
+    <div id="later-box" class="later" hidden>
+      <label>Day <select id="when-day">${dayOptions()}</select></label>
+      <label>Arrive at <input id="when-time" type="time" step="900"></label>
+    </div>
+    ${optGroup("How long do you need?", "need", NEEDS)}
+    ${optGroup("Cost", "free", [["0", "Any"], ["1", "Free only"]])}
+    ${optGroup("Your vehicle", "vehicle", VEHICLES, '<p class="hint">Shows the bays you can legally use. Motorbikes and permit holders can also use normal bays.</p>')}
+    <label class="toggle"><input type="checkbox" id="sure-only"><span>Only bays with a readable sign</span></label>
+    <div class="sheet-actions">
+      <button type="button" id="f-reset" class="btn">Reset</button>
+      <button type="button" id="f-done" class="btn primary"></button>
+    </div>`, { from: from || $("chip-more") });
+  syncFilterSheet();
+}
+
+function syncFilterSheet() {
+  const current = {
+    when: filters.later ? "later" : "now", need: String(filters.need), free: filters.free ? "1" : "0", vehicle: filters.vehicle,
+  };
+  for (const b of sheetBody.querySelectorAll(".opt")) b.setAttribute("aria-pressed", current[b.dataset.set] === b.dataset.v);
+  $("later-box").hidden = !filters.later;
+  if (filters.later) {
+    $("when-day").value = String(filters.later.day);
+    const mins = filters.later.mins;
+    $("when-time").value = `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
+  }
+  $("sure-only").checked = filters.sureOnly;
+  $("f-done").textContent = !Logic.isFiltering(filters) ? "Show all bays" : matched.length ? `Show ${nf.format(matched.length)} bays` : "No bays match";
+}
+
+function nextQuarter() {
+  const n = Logic.adelaideNow();
+  return { day: n.day, mins: Math.min(Math.ceil((n.mins + 1) / 15) * 15, 1425) };
+}
+
+sheetBody.addEventListener("click", (e) => {
+  const opt = e.target.closest(".opt");
+  if (opt) {
+    const v = opt.dataset.v;
+    const set = opt.dataset.set;
+    if (set === "when") setFilter({ later: v === "later" ? (filters.later || nextQuarter()) : null });
+    if (set === "need") setFilter({ need: Number(v) });
+    if (set === "free") setFilter({ free: v === "1" });
+    if (set === "vehicle") setFilter({ vehicle: v });
+  }
+  if (e.target.id === "f-reset") resetFilters();
+  if (e.target.id === "f-done") closeSheet();
+});
+sheetBody.addEventListener("change", (e) => {
+  if (e.target.id === "sure-only") setFilter({ sureOnly: e.target.checked });
+  if (e.target.id === "when-day" || e.target.id === "when-time") {
+    const [h, m] = ($("when-time").value || "00:00").split(":").map(Number);
+    setFilter({ later: { day: Number($("when-day").value), mins: h * 60 + m } });
+  }
+});
+
+// ---------- the clock ----------
+
 setInterval(() => {
-  tickClock();
-  if (freeOnly) refreshMarkers(); // windows open and close while you drive around
+  if (!bays.length) return;
+  if (!filters.later && Logic.isFiltering(filters)) applyFilters(); else updateChrome();
+  if (sheetKind === "bay" && picked != null) openBay(bays[picked], null, true);
 }, 30000);
 
-$("free-btn").onclick = (e) => {
-  freeOnly = !freeOnly;
-  e.currentTarget.setAttribute("aria-pressed", freeOnly);
-  refreshMarkers();
-};
+// ---------- search ----------
+
+const results = $("search-results");
+let searching = false;
+let searchPin = null;
+
+function hideResults() { results.hidden = true; results.innerHTML = ""; }
+
+function goTo(lat, lon, name) {
+  hideResults();
+  closeSheet();
+  searchPin?.remove();
+  searchPin = L.marker([lat, lon], {
+    icon: L.divIcon({ html: '<div class="target"></div>', className: "", iconSize: [26, 26] }), interactive: false, keyboard: false,
+  }).addTo(map);
+  map.setView([lat, lon], 18);
+  flash(`Showing bays near ${name}.`);
+}
+
+async function runSearch(q) {
+  if (searching) return;
+  searching = true;
+  results.hidden = false;
+  results.innerHTML = '<li class="result-note">Searching...</li>';
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 8000);
+  try {
+    // Nominatim asks for light use: one request per search, only when the user submits.
+    const params = new URLSearchParams({ format: "jsonv2", q: `${q}, Adelaide`, limit: "5", countrycodes: "au",
+      viewbox: "138.57,-34.89,138.64,-34.96", bounded: "1", "accept-language": "en" });
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, { signal: ctl.signal });
+    if (!r.ok) throw new Error(r.status);
+    const found = await r.json();
+    if (!found.length) {
+      results.innerHTML = '<li class="result-note">Nothing found in the city centre. Try a street name or a landmark.</li>';
+    } else {
+      results.innerHTML = found.map((f, i) => {
+        const [head, ...rest] = f.display_name.split(",");
+        return `<li><button type="button" data-i="${i}"><b>${esc(head)}</b><span>${esc(rest.slice(0, 2).join(","))}</span></button></li>`;
+      }).join("");
+      results.onclick = (e) => {
+        const f = found[e.target.closest("button")?.dataset.i];
+        if (f) goTo(Number(f.lat), Number(f.lon), f.display_name.split(",")[0]);
+      };
+    }
+  } catch {
+    results.innerHTML = '<li class="result-note">Search isn\'t working right now. Check your connection and try again.</li>';
+  } finally {
+    clearTimeout(timer);
+    searching = false;
+  }
+}
+
+$("search-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const q = $("search-input").value.trim();
+  if (q.length >= 2) runSearch(q);
+});
+$("search-input").addEventListener("input", (e) => {
+  if (!e.target.value) { hideResults(); searchPin?.remove(); searchPin = null; }
+});
+map.on("click", hideResults);
 
 // ---------- where am I, and follow me ----------
 
@@ -250,7 +497,7 @@ function startWatching() {
       const firstFix = !lastFix;
       lastFix = [pos.coords.latitude, pos.coords.longitude];
       if (!me) {
-        me = L.marker(lastFix, { icon: L.divIcon({ html: '<div class="me"></div>', className: "", iconSize: [20, 20] }), interactive: false, zIndexOffset: 1000 }).addTo(map);
+        me = L.marker(lastFix, { icon: L.divIcon({ html: '<div class="me"></div>', className: "", iconSize: [20, 20] }), interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(map);
       } else me.setLatLng(lastFix);
       if (follow || firstFix) map.setView(lastFix, Math.max(map.getZoom(), 17), { animate: true });
     },
@@ -283,32 +530,50 @@ $("follow-btn").onclick = () => {
 // Dragging the map means you want to look around, so stop chasing the car (same as Google Maps).
 map.on("dragstart", () => setFollow(false));
 
-// ---------- banner ----------
+// ---------- banner: one message at a time, most important first ----------
 
+let flashText = null;
 let flashTimer;
+const dismissed = new Set();
+
 function flash(text) {
-  const b = $("banner");
-  b.innerHTML = esc(text);
-  b.hidden = false;
+  flashText = text;
   clearTimeout(flashTimer);
-  flashTimer = setTimeout(() => { b.hidden = true; showCouncilStatus(); }, 5000);
+  flashTimer = setTimeout(() => { flashText = null; renderBanner(); }, 5000);
+  renderBanner();
 }
 
-let councilStatus = null;
-function showCouncilStatus() {
-  const s = councilStatus;
-  const b = $("banner");
-  if (!s || s.ok) { b.hidden = true; return; }
-  const since = new Date(s.since).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" });
-  const old = s.bays
-    ? `You're seeing the last copy we saved (${new Date(s.data_updated).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}).`
-    : "Bays will show up here by themselves once it's back.";
-  b.innerHTML = `<b>City of Adelaide's data server is down</b>
-    The council's parking data server has been refusing connections since ${since}. This is on the council's side, not a fault in this app. ${old} We check again every day.
-    <br><button type="button">Got it</button>`;
-  b.hidden = false;
-  b.querySelector("button").onclick = () => { b.hidden = true; };
+function pickBanner() {
+  if (flashText) return { id: "flash", html: esc(flashText) };
+  if (loadFailed) return { id: "load", html: "<b>Couldn't load the parking data</b>Check your connection.<br><button type=\"button\" data-act=\"retry\">Try again</button>" };
+  const s = feed;
+  if (s && !s.ok) {
+    const since = dateText(s.since, { day: "numeric", month: "short", year: "numeric" });
+    const old = s.bays ? `You're seeing the last copy we saved (${dateText(s.data_updated, { day: "numeric", month: "short" })}).` : "Bays will show up here by themselves once it's back.";
+    return { id: "council", html: `<b>City of Adelaide's data server is down</b>The council's parking data server has been refusing connections since ${esc(since)}. This is on the council's side, not a fault in this app. ${esc(old)} We check again every day.`, dismiss: true };
+  }
+  if (s?.checked && Date.now() - new Date(s.checked) > STALE_DAYS * 864e5) {
+    return { id: "stale", html: `<b>This data may be out of date</b>It was last checked ${esc(dateText(s.checked, { day: "numeric", month: "short" }))}. The daily update seems to have stopped, so read the signs carefully.`, dismiss: true };
+  }
+  if (!navigator.onLine) return { id: "offline", html: "<b>You're offline</b>Showing the last data and map tiles saved on this phone." };
+  return null;
 }
+
+function renderBanner() {
+  const b = $("banner");
+  const pick = pickBanner();
+  if (!pick || dismissed.has(pick.id)) { b.hidden = true; return; }
+  b.innerHTML = pick.html + (pick.dismiss ? '<br><button type="button" data-act="dismiss">Got it</button>' : "");
+  b.dataset.id = pick.id;
+  b.hidden = false;
+}
+$("banner").addEventListener("click", (e) => {
+  const act = e.target.closest("button")?.dataset.act;
+  if (act === "dismiss") { dismissed.add($("banner").dataset.id); renderBanner(); }
+  if (act === "retry") load();
+});
+addEventListener("online", renderBanner);
+addEventListener("offline", renderBanner);
 
 // ---------- load ----------
 
@@ -319,19 +584,36 @@ async function getJson(url) {
   } catch { return null; }
 }
 
-Promise.all([getJson("data/status.json"), getJson("data/parking.geojson")]).then(([status, geojson]) => {
-  councilStatus = status;
-  if (geojson?.features?.length) {
-    buildMarkers(geojson);
-    refreshMarkers();
-  } else if (!status) {
-    councilStatus = { ok: false, since: new Date().toISOString(), bays: 0 };
-  }
-  showCouncilStatus();
-  if (status?.data_updated) {
-    const tpl = $("key-template");
-    tpl.innerHTML = tpl.innerHTML.replace("CC BY 4.0.", `CC BY 4.0, last updated ${new Date(status.data_updated).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" })}.`);
-  }
-});
+function prepare(features) {
+  const spots = new Map();
+  const list = features.map((f, i) => {
+    const [lng, lat] = f.geometry.coordinates;
+    const b = { ...f.properties, i, lat, lng };
+    b.pt = { type: "Feature", properties: { i, t: b.category === "ticket" ? 1 : 0 }, geometry: { type: "Point", coordinates: [lng, lat] } };
+    const key = `${lat},${lng}`;
+    (spots.get(key) || spots.set(key, []).get(key)).push(b);
+    return b;
+  });
+  for (const group of spots.values()) group.forEach((b, k) => { b.dup = [k, group.length]; });
+  return list;
+}
 
-document.addEventListener("touchstart", () => {}, { passive: true }); // lets :active styles fire on iOS
+async function load() {
+  loadFailed = false;
+  const [s, geojson] = await Promise.all([getJson("data/status.json"), getJson("data/parking.geojson")]);
+  feed = s;
+  if (geojson?.features?.length) {
+    bays = prepare(geojson.features);
+    applyFilters();
+  } else if (!s) {
+    loadFailed = true;
+  }
+  updateChrome();
+  renderBanner();
+}
+load();
+updateChrome();
+
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+  addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+}

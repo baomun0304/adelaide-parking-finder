@@ -14,7 +14,7 @@ from pathlib import Path
 import requests
 
 from arcgis import fetch_layer
-from hours import parse_windows
+from hours import parse_sign
 from layers import LAYERS
 
 SERVICE_ROOT = "https://gis.cityofadelaide.com.au/server/rest/services/External_Facing_Data"
@@ -26,18 +26,22 @@ def build_feature(raw, layer):
     hours_text = " ".join((attrs.get(f"CLASS{i}") or "").strip() for i in range(1, 5)).strip()
     hours_text = " ".join(hours_text.split())  # the council pads some fields with spaces
     timed = layer["category"] in ("free", "ticket")
+    parsed = parse_sign(hours_text, layer["days"], layer["max_stay"]) if timed else None
+    props = {
+        "category": layer["category"],
+        "max_stay": layer["max_stay"],
+        "spaces": attrs.get("NO_SPACES"),
+        "angle": (str(attrs.get("ZONEANGLE") or "").strip() or None),
+        "hours_text": hours_text or None,
+        "windows": parsed["windows"] if parsed else None,
+        "exemptions": (attrs.get("Exemptions") or "").strip() or None,
+    }
+    if parsed and parsed["closed"]:
+        props["closed"] = parsed["closed"]
     return {
         "type": "Feature",
         "geometry": {"type": "Point", "coordinates": [round(geom["x"], 6), round(geom["y"], 6)]},
-        "properties": {
-            "category": layer["category"],
-            "max_stay": layer["max_stay"],
-            "spaces": attrs.get("NO_SPACES"),
-            "angle": (str(attrs.get("ZONEANGLE") or "").strip() or None),
-            "hours_text": hours_text or None,
-            "windows": parse_windows(hours_text, layer["days"]) if timed else None,
-            "exemptions": (attrs.get("Exemptions") or "").strip() or None,
-        },
+        "properties": props,
     }
 
 
@@ -49,6 +53,7 @@ def main():
     session = requests.Session()
     session.headers["User-Agent"] = "adelaide-parking-finder (github.com/baomun0304/adelaide-parking-finder)"
     features, failed, unreadable = [], [], set()
+    timed_bays = unreadable_bays = 0
 
     for layer in LAYERS:
         try:
@@ -60,8 +65,11 @@ def main():
         for item in raw:
             feature = build_feature(item, layer)
             props = feature["properties"]
-            if props["category"] in ("free", "ticket") and props["windows"] is None:
-                unreadable.add(props["hours_text"])
+            if props["category"] in ("free", "ticket"):
+                timed_bays += 1
+                if props["windows"] is None:
+                    unreadable_bays += 1
+                    unreadable.add(props["hours_text"])
             features.append(feature)
         print(f"{layer['name']}: {len(raw)}")
 
@@ -91,6 +99,9 @@ def main():
         "failed_layers": len(failed),
         "error": failed[0] if failed else None,
         "unreadable_hours": len(unreadable) if ok else old.get("unreadable_hours", 0),
+        "timed_bays": timed_bays if ok else old.get("timed_bays", 0),
+        "unreadable_bays": unreadable_bays if ok else old.get("unreadable_bays", 0),
+        "checked": _now(),
     }
     status_path.write_text(json.dumps(status, indent=2) + "\n")
 

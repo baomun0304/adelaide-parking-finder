@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import MagicMock
 
 from arcgis import fetch_layer
-from hours import parse_windows
+from hours import parse_sign
 from layers import LAYERS, VALID_CATEGORIES
 from sync_parking import build_feature
 
@@ -13,21 +13,56 @@ WEEKDAYS = [0, 1, 2, 3, 4]
 class Hours(unittest.TestCase):
     def test_real_council_sample(self):
         text = "2 hr Ticket Monday to Friday 8am-6pm Saturday 8am-noon"
-        self.assertEqual(parse_windows(text, "weekday"), [[WEEKDAYS, 480, 1080], [[5], 480, 720]])
+        r = parse_sign(text, "weekday", 120)
+        self.assertEqual(r["windows"], [[WEEKDAYS, 480, 1080, 120, 1], [[5], 480, 720, 120, 1]])
+        self.assertEqual(r["closed"], [])
+
+    def test_different_limit_on_saturday(self):
+        r = parse_sign("2 hr Ticket Monday to Friday 8am-6pm 3 hr Ticket Saturday 8am-noon", "weekday", 120)
+        self.assertEqual(r["windows"][1], [[5], 480, 720, 180, 1])
+
+    def test_no_stopping_then_ticket(self):
+        text = "No Stopping Monday to Friday 7am-10am 3 hr Ticket Monday to Friday 10am-7pm Saturday & Sunday 7am-7pm"
+        r = parse_sign(text, "weekday", 180)
+        self.assertEqual(r["closed"], [[WEEKDAYS, 420, 600, "No stopping"]])
+        self.assertEqual(r["windows"][0], [WEEKDAYS, 600, 1140, 180, 1])
+        self.assertEqual(r["windows"][1], [[5, 6], 420, 1140, 180, 1])
+
+    def test_all_other_times_becomes_the_gaps(self):
+        r = parse_sign("5 hr Area Parking Any Day 6am-10pm No Stopping At all other times", "any", 300)
+        self.assertEqual(r["windows"], [[list(range(7)), 360, 1320, 300, 0]])
+        self.assertEqual(r["closed"], [[list(range(7)), 0, 360, "No stopping"], [list(range(7)), 1320, 1440, "No stopping"]])
+
+    def test_residents_outside_the_sign(self):
+        r = parse_sign("2 hr Parking Monday to Friday 8am-6pm Saturday 8am-noon Residential At all other times", "weekday", 120)
+        labels = {c[3] for c in r["closed"]}
+        self.assertEqual(labels, {"Residents only"})
+        sunday = [c for c in r["closed"] if 6 in c[0]]
+        self.assertEqual(sunday, [[sunday[0][0], 0, 1440, "Residents only"]])
+
+    def test_overnight_evening_window_is_split(self):
+        r = parse_sign("Taxi Friday 10pm-6am 1 hr Ticket Any Day 9am-6pm", "any", 60)
+        self.assertEqual(r["closed"], [[[4], 1320, 1440, "Taxi rank"], [[5], 0, 360, "Taxi rank"]])
+
+    def test_bus_lane_and_noon(self):
+        r = parse_sign("Bus Lane Monday to Friday 7am-10am 15 min Parking Monday to Friday 10am-7pm Saturday 7am-12noon", "weekday", 15)
+        self.assertEqual(r["closed"][0][3], "Bus lane")
+        self.assertEqual(r["windows"][1], [[5], 420, 720, 15, 0])
 
     def test_no_days_falls_back_to_layer_days(self):
-        self.assertEqual(parse_windows("1P 9am-5pm", "weekend"), [[[5, 6], 540, 1020]])
-
-    def test_short_day_names_and_minutes(self):
-        self.assertEqual(parse_windows("Mon-Thu 7:30am-6.30pm", "any"), [[[0, 1, 2, 3], 450, 1110]])
-
-    def test_midnight_end(self):
-        self.assertEqual(parse_windows("Sat & Sun 10am-midnight"), [[[5, 6], 600, 1440]])
+        self.assertEqual(parse_sign("1 hr Parking 9am-5pm", "weekend")["windows"], [[[5, 6], 540, 1020, 60, 0]])
 
     def test_unreadable_text_is_none_never_a_guess(self):
-        for text in ["", None, "Unrestricted", "Permit holders only", "8am-6pm Mon-Fri",
-                     "Mon-Fri 10pm-6am", "Mon-Fri 8am-6pm Sat 8am"]:
-            self.assertIsNone(parse_windows(text, "weekday"), text)
+        for text in ["", None, "Unrestricted", "Permit holders only", "2 hr Parking 8am-6pm Mon-Fri extra",
+                     "2 hr Parking Monday to Friday 8am-6am",   # council typo, morning start
+                     "2 hr Parking Monday to Friday 8pm-8pm",
+                     "2 hr Ticket Monday to Friday 3 hr Ticket Saturday 8am-noon",
+                     "No Stopping Monday to Friday 7am-9am",    # no time limit anywhere
+                     "Residential At all other times 3 hr Ticket Monday to Friday 8am-6pm Disabled At all other times"]:
+            self.assertIsNone(parse_sign(text, "weekday"), text)
+
+    def test_layer_and_sign_disagreeing_is_none(self):
+        self.assertIsNone(parse_sign("2 hr Ticket Monday to Friday 8am-6pm", "weekday", 60))
 
 
 class Layers(unittest.TestCase):
@@ -71,7 +106,8 @@ class BuildFeature(unittest.TestCase):
         self.assertEqual(f["geometry"]["coordinates"], [138.612346, -34.927123])
         p = f["properties"]
         self.assertEqual(p["hours_text"], "2 hr Ticket Monday to Friday 8am-6pm Saturday 8am-noon")
-        self.assertEqual(p["windows"][1], [[5], 480, 720])
+        self.assertEqual(p["windows"][1], [[5], 480, 720, 120, 1])
+        self.assertNotIn("closed", p)
         self.assertEqual((p["spaces"], p["angle"], p["max_stay"], p["exemptions"]), (13, "90", 120, None))
 
     def test_untimed_category_has_no_windows(self):
