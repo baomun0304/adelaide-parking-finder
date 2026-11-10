@@ -5,11 +5,8 @@ const THEME_KEY = "apf_theme";
 const VEHICLE_KEY = "apf_vehicle";
 const REPO = "https://github.com/baomun0304/adelaide-parking-finder";
 const STALE_DAYS = 3;
-const TILES = {
-  light: ["World_Light_Gray_Base", "World_Light_Gray_Reference"],
-  dark: ["World_Dark_Gray_Base", "World_Dark_Gray_Reference"],
-};
-const tileUrl = (name) => `https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/${name}/MapServer/tile/{z}/{y}/{x}`;
+const STYLE_URL = "https://tiles.openfreemap.org/styles/";
+const STYLES = { light: "bright", dark: "fiord" };
 const NEEDS = [[0, "Any"], [30, "30 min"], [60, "1 hr"], [120, "2 hr"], [180, "3 hr"], [240, "4 hr"], [600, "All day"]];
 const VEHICLES = [["car", "Car"], ["moto", "Motorbike"], ["disabled", "Disability permit"]];
 
@@ -27,32 +24,23 @@ const nf = new Intl.NumberFormat("en-AU");
 const map = L.map("map", { zoomControl: false, minZoom: 12, maxZoom: 18 }).setView(ADELAIDE, 15);
 map.attributionControl.setPrefix(false);
 
-function tileLayers(theme) {
-  const base = { maxZoom: 18, maxNativeZoom: 16, crossOrigin: true }; // CORS lets the service worker keep tiles for offline
-  return [
-    L.tileLayer(tileUrl(TILES[theme][0]), { ...base, attribution: "Esri, HERE, Garmin, &copy; OpenStreetMap contributors" }),
-    L.tileLayer(tileUrl(TILES[theme][1]), base),
-  ];
-}
+map.attributionControl.addAttribution(
+  '<a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> &copy; OpenMapTiles, data from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>');
 
 const systemDark = matchMedia("(prefers-color-scheme: dark)");
 const activeTheme = () => store.get(THEME_KEY) || (systemDark.matches ? "dark" : "light");
 let shownTheme = activeTheme();
 document.documentElement.dataset.theme = shownTheme;
-let tiles = tileLayers(shownTheme);
-tiles.forEach((l) => l.addTo(map));
+// A vector basemap drawn by MapLibre inside the Leaflet map, so the pins and sheets stay as they were.
+const basemap = L.maplibreGL({ style: STYLE_URL + STYLES[shownTheme] }).addTo(map);
 
-// The new tiles load on top of the old ones, and the old ones go only once the new ones are in,
-// so switching never shows a half-and-half map.
+// setStyle swaps the look in place, so switching never shows a half-and-half map.
 function applyTheme(theme, remember) {
   if (remember) store.set(THEME_KEY, theme);
   if (theme === shownTheme) return;
-  const old = tiles;
   shownTheme = theme;
   document.documentElement.dataset.theme = theme;
-  tiles = tileLayers(theme);
-  tiles.forEach((l) => l.addTo(map));
-  tiles[0].once("load", () => old.forEach((l) => map.removeLayer(l)));
+  basemap.getMaplibreMap().setStyle(STYLE_URL + STYLES[theme]);
 }
 $("theme-btn").onclick = () => applyTheme(shownTheme === "dark" ? "light" : "dark", true);
 systemDark.addEventListener?.("change", () => { if (!store.get(THEME_KEY)) applyTheme(activeTheme(), false); });
@@ -333,7 +321,7 @@ function aboutHtml() {
     ${checked ? `<li>Data checked ${esc(checked)}${updated ? `, last changed ${esc(updated)}` : ""}. It updates once a day.</li>` : ""}
     <li>Your location stays on your phone. Search sends what you type to OpenStreetMap's Nominatim service.</li>
   </ul>
-  <p class="fine">Parking data: City of Adelaide, CC BY 4.0. Map: Esri, OpenStreetMap contributors. An independent project, not affiliated with the council. <a href="${REPO}/issues" target="_blank" rel="noopener">Report a wrong bay</a>.</p>`;
+  <p class="fine">Parking data: City of Adelaide, CC BY 4.0. Map: OpenFreeMap, OpenMapTiles, OpenStreetMap contributors. An independent project, not affiliated with the council. <a href="${REPO}/issues" target="_blank" rel="noopener">Report a wrong bay</a>.</p>`;
 }
 $("key-btn").onclick = (e) => openSheet("key", aboutHtml(), { from: e.currentTarget });
 

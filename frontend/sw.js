@@ -1,12 +1,13 @@
 "use strict";
 // Keeps the app, the parking data and the map tiles you've looked at, so it still opens with no signal.
 // Pages and data go to the network first (so they are never stale when you're online); tiles are cached first.
-const VERSION = "apf-v1";
+const VERSION = "apf-v2";
 const TILES = "apf-tiles";
 const MAX_TILES = 600;
 const SHELL = [
   "/", "/style.css", "/app.js", "/logic.js", "/manifest.webmanifest",
   "/vendor/leaflet.js", "/vendor/leaflet.css", "/vendor/supercluster.min.js",
+  "/vendor/maplibre-gl.js", "/vendor/maplibre-gl.css", "/vendor/leaflet-maplibre-gl.js",
   "/icons/icon-192.png", "/data/parking.geojson", "/data/status.json",
 ];
 
@@ -50,6 +51,6 @@ self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
-  if (url.hostname === "services.arcgisonline.com") e.respondWith(tileFirst(req));
+  if (url.hostname === "tiles.openfreemap.org") e.respondWith(tileFirst(req));
   else if (url.origin === location.origin && !url.pathname.startsWith("/_vercel/")) e.respondWith(networkFirst(req));
 });

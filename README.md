@@ -76,4 +76,4 @@ CI runs both on every push (`.github/workflows/ci.yml`).
 
 ## Data
 
-Parking data: City of Adelaide, licensed CC BY 4.0 (data.sa.gov.au, "On-Street Parking Zones"). Base map: Esri, OpenStreetMap contributors. Search: OpenStreetMap Nominatim (what you type is sent to them, only when you press search). This is an independent project, not affiliated with the council. Always follow the sign on the street.
+Parking data: City of Adelaide, licensed CC BY 4.0 (data.sa.gov.au, "On-Street Parking Zones"). Base map: OpenFreeMap, OpenMapTiles, OpenStreetMap contributors. Search: OpenStreetMap Nominatim (what you type is sent to them, only when you press search). This is an independent project, not affiliated with the council. Always follow the sign on the street.
