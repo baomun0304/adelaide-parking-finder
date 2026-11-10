@@ -316,3 +316,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .leaflet-marker-icon:focus-visible { outline: none; }
 .leaflet-marker-icon:focus-visible .pin, .leaflet-marker-icon:focus-visible .cluster { outline: 3px solid var(--blue); outline-offset: 3px; }
 .badge[hidden], .later[hidden] { display: none; }
+
+.w-where { display: flex; gap: 8px; margin-top: 14px; }
+.w-where input {
+  flex: 1; min-width: 0; min-height: 48px; padding: 0 14px; border: 2px solid var(--line); border-radius: 12px;
+  background: var(--card); color: var(--ink); font: inherit; font-size: 16px;
+}
+.w-near { width: 100%; margin-top: 8px; }

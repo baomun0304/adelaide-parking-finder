@@ -63,6 +63,7 @@ let bays = [];
 let matched = [];
 let feed = null;
 let loadFailed = false;
+let started = false; // the map stays empty until the visitor has had their say on the welcome sheet
 const filters = { ...Logic.DEFAULT_FILTERS, vehicle: store.get(VEHICLE_KEY) || "car" };
 if (!VEHICLES.some(([v]) => v === filters.vehicle)) filters.vehicle = "car";
 
@@ -119,7 +120,7 @@ function clusterMarker(c) {
 }
 
 function render() {
-  if (!index) return;
+  if (!index || !started) return;
   const b = map.getBounds().pad(0.25);
   const zoom = Math.min(Math.round(map.getZoom()), 18);
   const keep = new Set();
@@ -181,7 +182,7 @@ function updateChrome() {
     <span class="status-sub">${esc(when)} (Adelaide)${fresh}</span>
     <span class="status-actions">${filtering ? '<button type="button" data-act="reset">Reset</button>' : ""}${filters.later ? '<button type="button" data-act="now">Back to now</button>' : ""}</span>`;
   if ($("status").dataset.html !== html) { $("status").innerHTML = html; $("status").dataset.html = html; }
-  if (sheetKind === "filters") syncFilterSheet();
+  if (sheetKind === "filters" || sheetKind === "welcome") syncFilterSheet();
 }
 
 $("status").addEventListener("click", (e) => {
@@ -225,6 +226,7 @@ function openSheet(kind, html, { focus = true, from = null } = {}) {
 
 function closeSheet() {
   if (sheet.hidden) return;
+  const wasWelcome = sheetKind === "welcome";
   sheet.classList.add("closing");
   sheetKind = null;
   setTimeout(() => { if (sheet.classList.contains("closing")) sheet.hidden = true; }, 300);
@@ -232,6 +234,7 @@ function closeSheet() {
   markPicked();
   if (opener && document.contains(opener)) opener.focus({ preventScroll: true });
   opener = null;
+  if (wasWelcome) startMap();
 }
 
 sheet.querySelector(".sheet-close").onclick = closeSheet;
@@ -379,8 +382,44 @@ function syncFilterSheet() {
     const mins = filters.later.mins;
     $("when-time").value = `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
   }
-  $("sure-only").checked = filters.sureOnly;
-  $("f-done").textContent = !Logic.isFiltering(filters) ? "Show all bays" : matched.length ? `Show ${nf.format(matched.length)} bays` : "No bays match";
+  if ($("sure-only")) $("sure-only").checked = filters.sureOnly;
+  const label = !bays.length ? "Show the map" : !Logic.isFiltering(filters) ? "Show all bays" : matched.length ? `Show ${nf.format(matched.length)} bays` : "No bays match";
+  for (const id of ["f-done", "w-go"]) if ($(id)) $(id).textContent = label;
+}
+
+// ---------- welcome: ask first, then draw the map ----------
+
+const SEEN_KEY = "apf_welcome_seen";
+const seenThisVisit = () => { try { return !!sessionStorage.getItem(SEEN_KEY); } catch { return false; } };
+
+function startMap() {
+  if (started) return;
+  started = true;
+  try { sessionStorage.setItem(SEEN_KEY, "1"); } catch { /* fine, it will just ask again next time */ }
+  applyFilters();
+}
+
+function openWelcome() {
+  openSheet("welcome", `
+    <h2 id="sheet-title" class="sheet-title">Where are you parking?</h2>
+    <p class="sheet-lead">Tell us a little and we will show only the bays that suit you. Or skip and look at the whole map.</p>
+    <form id="w-search" class="w-where" role="search">
+      <input id="w-q" type="search" placeholder="Street or place, e.g. Rundle Mall" aria-label="Street or place" enterkeyhint="search" maxlength="80" autocomplete="off">
+      <button type="submit" class="btn">Search</button>
+    </form>
+    <button type="button" id="w-near" class="btn w-near">Use my location</button>
+    ${optGroup("When are you parking?", "when", [["now", "Now"], ["later", "Later"]])}
+    <div id="later-box" class="later" hidden>
+      <label>Day <select id="when-day">${dayOptions()}</select></label>
+      <label>Arrive at <input id="when-time" type="time" step="900"></label>
+    </div>
+    ${optGroup("How long do you need?", "need", NEEDS)}
+    ${optGroup("Cost", "free", [["0", "Any"], ["1", "Free only"]], '<p class="hint">We have no prices, only whether a bay is free or ticketed. Check the machine for the rate.</p>')}
+    <div class="sheet-actions">
+      <button type="button" id="w-skip" class="btn">Skip, show the map</button>
+      <button type="button" id="w-go" class="btn primary"></button>
+    </div>`, { focus: false });
+  syncFilterSheet();
 }
 
 function nextQuarter() {
@@ -399,7 +438,16 @@ sheetBody.addEventListener("click", (e) => {
     if (set === "vehicle") setFilter({ vehicle: v });
   }
   if (e.target.id === "f-reset") resetFilters();
-  if (e.target.id === "f-done") closeSheet();
+  if (e.target.id === "f-done" || e.target.id === "w-go" || e.target.id === "w-skip") closeSheet();
+  if (e.target.id === "w-near") { startWatching(); closeSheet(); }
+});
+sheetBody.addEventListener("submit", (e) => {
+  if (e.target.id !== "w-search") return;
+  e.preventDefault();
+  const q = $("w-q").value.trim();
+  if (q.length < 2) return;
+  $("search-input").value = q;
+  runSearch(q); // picking a result closes this sheet, which starts the map
 });
 sheetBody.addEventListener("change", (e) => {
   if (e.target.id === "sure-only") setFilter({ sureOnly: e.target.checked });
@@ -613,6 +661,7 @@ async function load() {
 }
 load();
 updateChrome();
+if (seenThisVisit()) startMap(); else openWelcome();
 
 if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
   addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));

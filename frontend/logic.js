@@ -148,7 +148,7 @@
     if (fixed) return { tone: fixed[0], head: fixed[1], sub: fixed[2], blocksFree: fixed[0] === "no" };
 
     if (!bay.windows) {
-      return { tone: "special", head: "Check the sign", sub: "We couldn't read this sign's hours for sure.", unknown: true, blocksFree: bay.category === "ticket" };
+      return { tone: "special", head: "Check the sign", sub: "The council's data doesn't give clear hours for this bay, so we can't say if it's free right now. Read the sign on the street before you park.", unknown: true, blocksFree: bay.category === "ticket" };
     }
     const at = isNow ? "right now" : "at that time";
     const s = stateAt(bay, m);
