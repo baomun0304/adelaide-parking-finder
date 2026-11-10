@@ -119,3 +119,19 @@ class BuildFeature(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HintTests(unittest.TestCase):
+    def _bay(self, x, text, windows, stay=120):
+        return {"geometry": {"coordinates": [x, -34.92]},
+                "properties": {"category": "free", "max_stay": stay, "hours_text": text, "windows": windows}}
+
+    def test_empty_bay_borrows_the_neighbour_sign(self):
+        from sync_parking import add_hints
+        donor = self._bay(138.6000, "2 hr Parking Monday to Friday 8am-6pm", [[[1], 480, 1080, 120, False]])
+        empty = self._bay(138.60002, None, None)
+        far = self._bay(138.6100, None, None)
+        add_hints([donor, empty, far])
+        self.assertEqual(empty["properties"]["hint"], donor["properties"]["hours_text"])
+        self.assertNotIn("hint", far["properties"])
+        self.assertIsNone(empty["properties"]["windows"])  # a hint never becomes a rule

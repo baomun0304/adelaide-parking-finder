@@ -283,6 +283,7 @@ function openBay(b, from, quiet = false) {
   const d = Logic.describe(b, m, !filters.later);
   const facts = [
     ["Sign says", b.hours_text],
+    ["Bay beside it says", b.hours_text ? null : b.hint],
     ["Not allowed", closedLines(b)],
     ["Spaces", b.spaces > 0 ? b.spaces : null],
     ["Parking angle", b.angle && /^\d+$/.test(b.angle) ? `${b.angle}°` : b.angle],

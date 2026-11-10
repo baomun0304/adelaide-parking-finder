@@ -45,6 +45,36 @@ def build_feature(raw, layer):
     }
 
 
+HINT_DEGREES = 6e-5  # about 6 m: the next bay along the same kerb
+
+
+def add_hints(features):
+    """Bays with no sign text in the council data borrow the sign of the nearest bay beside them.
+
+    Shown as a hint only. It never feeds the free or time filters, because a guess that is wrong costs a fine.
+    """
+    donors = {}
+    for f in features:
+        p = f["properties"]
+        if p["category"] in ("free", "ticket") and p["windows"]:
+            x, y = f["geometry"]["coordinates"]
+            donors.setdefault((int(x * 1e4), int(y * 1e4)), []).append((x, y, p))
+    for f in features:
+        p = f["properties"]
+        if p["category"] not in ("free", "ticket") or p["hours_text"]:
+            continue
+        x, y = f["geometry"]["coordinates"]
+        best = None
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for x2, y2, p2 in donors.get((int(x * 1e4) + dx, int(y * 1e4) + dy), []):
+                    d = max(abs(x2 - x), abs(y2 - y))
+                    if d < HINT_DEGREES and p2["max_stay"] == p["max_stay"] and (best is None or d < best[0]):
+                        best = (d, p2["hours_text"])
+        if best:
+            p["hint"] = best[1]
+
+
 def _now():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -73,6 +103,7 @@ def main():
             features.append(feature)
         print(f"{layer['name']}: {len(raw)}")
 
+    add_hints(features)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     status_path = DATA_DIR / "status.json"
     old = json.loads(status_path.read_text()) if status_path.exists() else {}
