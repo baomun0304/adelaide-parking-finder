@@ -1,12 +1,12 @@
 {
   "ok": true,
   "since": "2026-11-05T22:56:49+00:00",
-  "data_updated": "2026-11-10T13:42:37+00:00",
+  "data_updated": "2026-11-10T13:45:59+00:00",
   "bays": 5929,
   "failed_layers": 0,
   "error": null,
   "unreadable_hours": 15,
   "timed_bays": 4123,
   "unreadable_bays": 1125,
-  "checked": "2026-11-10T13:42:37+00:00"
+  "checked": "2026-11-10T13:45:59+00:00"
 }

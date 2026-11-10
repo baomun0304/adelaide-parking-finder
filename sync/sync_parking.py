@@ -51,7 +51,8 @@ HINT_DEGREES = 6e-5  # about 6 m: the next bay along the same kerb
 def add_hints(features):
     """Bays with no sign text in the council data borrow the sign of the nearest bay beside them.
 
-    Shown as a hint only. It never feeds the free or time filters, because a guess that is wrong costs a fine.
+    The sheet says "probably the same" and the pin keeps its question mark. The filters use the borrowed hours
+    so a late-night search is not hidden by a limit that probably is not in force.
     """
     donors = {}
     for f in features:
@@ -70,9 +71,13 @@ def add_hints(features):
                 for x2, y2, p2 in donors.get((int(x * 1e4) + dx, int(y * 1e4) + dy), []):
                     d = max(abs(x2 - x), abs(y2 - y))
                     if d < HINT_DEGREES and p2["max_stay"] == p["max_stay"] and (best is None or d < best[0]):
-                        best = (d, p2["hours_text"])
+                        best = (d, p2)
         if best:
-            p["hint"] = best[1]
+            donor = best[1]
+            p["hint"] = donor["hours_text"]
+            p["hint_windows"] = donor["windows"]
+            if donor.get("closed"):
+                p["hint_closed"] = donor["closed"]
 
 
 def _now():

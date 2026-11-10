@@ -215,6 +215,7 @@
     if (f.sureOnly && timed && !bay.windows) return false;
     if (bay.category === "unrestricted") return true;
     if (!timed) return !f.need || !bay.max_stay || bay.max_stay >= f.need; // permit bays: sign text is shown in the sheet
+    if (!bay.windows && bay.hint_windows) return spanOk({ ...bay, windows: bay.hint_windows, closed: bay.hint_closed }, m, f.need, f.free);
     if (!bay.windows) return (!f.free || bay.category === "free") && (!f.need || bay.max_stay >= f.need);
     return spanOk(bay, m, f.need, f.free);
   }

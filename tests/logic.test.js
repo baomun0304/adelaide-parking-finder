@@ -128,3 +128,13 @@ test("labels", () => {
   assert.equal(L.daysText([5, 6]), "Sat, Sun");
   assert.equal(L.momentLabel(at(TUE, 16, 1)), "Tue 4:01pm");
 });
+
+test("a bay with no hours of its own uses the neighbouring sign for time filters", () => {
+  const weekday = [[1, 2, 3, 4, 5], 480, 1080, 120, false];
+  const bay = { category: "free", max_stay: 120, windows: null, hint: "2 hr Parking Monday to Friday 8am-6pm", hint_windows: [weekday] };
+  const f = { ...L.DEFAULT_FILTERS, need: 240 };
+  assert.equal(L.matches(bay, f, { day: 3, mins: 23 * 60 }), true, "11pm: the limit is not in force");
+  assert.equal(L.matches(bay, f, { day: 3, mins: 12 * 60 }), false, "noon: only 2 hours");
+  const lone = { category: "free", max_stay: 120, windows: null };
+  assert.equal(L.matches(lone, { ...L.DEFAULT_FILTERS, free: true }, { day: 3, mins: 23 * 60 }), true);
+});
