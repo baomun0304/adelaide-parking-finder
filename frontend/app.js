@@ -7,6 +7,14 @@ const REPO = "https://github.com/baomun0304/adelaide-parking-finder";
 const STALE_DAYS = 3;
 const STYLE_URL = "https://tiles.openfreemap.org/styles/";
 const STYLES = { light: "bright", dark: "fiord" };
+const BASE_KEY = "apf_base";
+const ESRI = "https://services.arcgisonline.com/ArcGIS/rest/services/";
+const esriTiles = (name, attribution) => ({ type: "raster", tiles: [`${ESRI}${name}/MapServer/tile/{z}/{y}/{x}`], tileSize: 256, maxzoom: 19, attribution });
+const SATELLITE = {
+  version: 8,
+  sources: { imagery: esriTiles("World_Imagery", "Esri, Maxar, Earthstar Geographics"), roads: esriTiles("Reference/World_Transportation", "") },
+  layers: [{ id: "imagery", type: "raster", source: "imagery" }, { id: "roads", type: "raster", source: "roads" }],
+};
 const NEEDS = [[0, "Any"], [30, "30 min"], [60, "1 hr"], [120, "2 hr"], [180, "3 hr"], [240, "4 hr"], [600, "All day"]];
 const VEHICLES = [["car", "Car"], ["moto", "Motorbike"], ["disabled", "Disability permit"]];
 
@@ -21,26 +29,66 @@ const nf = new Intl.NumberFormat("en-AU");
 
 // ---------- map and theme ----------
 
-const map = L.map("map", { zoomControl: false, minZoom: 12, maxZoom: 18 }).setView(ADELAIDE, 15);
-map.attributionControl.setPrefix(false);
-
-map.attributionControl.addAttribution(
-  '<a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> &copy; OpenMapTiles, data from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>');
-
 const systemDark = matchMedia("(prefers-color-scheme: dark)");
 const activeTheme = () => store.get(THEME_KEY) || (systemDark.matches ? "dark" : "light");
 let shownTheme = activeTheme();
 document.documentElement.dataset.theme = shownTheme;
-// A vector basemap drawn by MapLibre inside the Leaflet map, so the pins and sheets stay as they were.
-const basemap = L.maplibreGL({ style: STYLE_URL + STYLES[shownTheme] }).addTo(map);
+let satellite = store.get(BASE_KEY) === "satellite";
+let tilted = false; // 3D is a way of looking, so every visit starts flat
+const styleFor = () => (satellite ? SATELLITE : STYLE_URL + STYLES[shownTheme]);
 
-// setStyle swaps the look in place, so switching never shows a half-and-half map.
+// MapLibre draws the map. Its zoom is one lower than the tile zoom the pins were tuned for (512px tiles),
+// so ZOOM_SHIFT converts between the two.
+const ZOOM_SHIFT = 1;
+const map = new maplibregl.Map({
+  container: "map", style: styleFor(), center: [ADELAIDE[1], ADELAIDE[0]], zoom: 15 - ZOOM_SHIFT,
+  minZoom: 12 - ZOOM_SHIFT, maxZoom: 18 - ZOOM_SHIFT, dragRotate: false, pitchWithRotate: false, touchPitch: false,
+  attributionControl: false, fadeDuration: 0,
+});
+map.touchZoomRotate.disableRotation();
+map.addControl(new maplibregl.AttributionControl(), "bottom-right"); // each style names its own sources
+new ResizeObserver(() => map.resize()).observe($("map")); // phone toolbars and rotation change the size without a window resize
+const tileZoom = () => map.getZoom() + ZOOM_SHIFT;
+const lookAt = (lat, lng, zoom) => map.easeTo({ center: [lng, lat], zoom: zoom - ZOOM_SHIFT, duration: 600 });
+
+// ---- 3D buildings: extruded footprints from the same vector tiles, only while tilted
+function addBuildings() {
+  if (!tilted || !map.getSource("openmaptiles") || map.getLayer("apf-3d")) return;
+  map.addLayer({
+    id: "apf-3d", type: "fill-extrusion", source: "openmaptiles", "source-layer": "building", minzoom: 14,
+    paint: {
+      "fill-extrusion-color": shownTheme === "dark" ? "#4a5470" : "#d3cbbb",
+      "fill-extrusion-height": ["coalesce", ["get", "render_height"], 8],
+      "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0],
+      "fill-extrusion-opacity": 0.88,
+    },
+  });
+}
+map.on("style.load", addBuildings); // a new style wipes custom layers
+
+function setTilt(on) {
+  tilted = on;
+  $("tilt-btn").setAttribute("aria-pressed", on);
+  if (on) addBuildings(); else if (map.getLayer("apf-3d")) map.removeLayer("apf-3d");
+  map.easeTo({ pitch: on ? 55 : 0, duration: 600 });
+}
+function setSatellite(on) {
+  satellite = on;
+  store.set(BASE_KEY, on ? "satellite" : "map");
+  $("sat-btn").setAttribute("aria-pressed", on);
+  map.setStyle(styleFor());
+}
+$("tilt-btn").onclick = () => setTilt(!tilted);
+$("sat-btn").onclick = () => setSatellite(!satellite);
+$("sat-btn").setAttribute("aria-pressed", satellite);
+
+// A new style swaps the look in place, so switching never shows a half-and-half map.
 function applyTheme(theme, remember) {
   if (remember) store.set(THEME_KEY, theme);
   if (theme === shownTheme) return;
   shownTheme = theme;
   document.documentElement.dataset.theme = theme;
-  basemap.getMaplibreMap().setStyle(STYLE_URL + STYLES[theme]);
+  if (!satellite) map.setStyle(styleFor());
 }
 $("theme-btn").onclick = () => applyTheme(shownTheme === "dark" ? "light" : "dark", true);
 systemDark.addEventListener?.("change", () => { if (!store.get(THEME_KEY)) applyTheme(activeTheme(), false); });
@@ -76,60 +124,79 @@ const WORDS = {
 };
 const bayLabel = (b) => `${WORDS[b.category]}${b.max_stay ? `, ${Logic.stayWords(b.max_stay)}` : ""}. ${b.hours_text || "Check the sign"}. Press Enter for details.`;
 
-const layer = L.layerGroup().addTo(map);
 const live = new Map(); // key -> marker currently on the map
 let index = null;
 let picked = null;
 
+// A marker is a plain element, so the pins keep their CSS and work with a keyboard.
+function makeMarker({ html, cls, w, h, label, lat, lng, shift = 0, onClick }) {
+  const el = document.createElement("div");
+  el.className = `apf-marker ${cls}`;
+  el.style.width = `${w}px`;
+  el.style.height = `${h}px`;
+  el.innerHTML = html;
+  el.title = label;
+  el.setAttribute("aria-label", label);
+  el.setAttribute("role", "button");
+  el.tabIndex = 0;
+  const go = (e) => { e.stopPropagation(); onClick(el); }; // a pin tap must not count as a tap on the map
+  el.addEventListener("click", go);
+  el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(e); } });
+  return new maplibregl.Marker({ element: el, offset: [shift, 0] }).setLngLat([lng, lat]);
+}
+
 function bayMarker(b) {
   const [k, n] = b.dup;
   const shift = (k - (n - 1) / 2) * 50; // bays that share a spot fan out side by side at full zoom
-  const m = L.marker([b.lat, b.lng], {
-    icon: L.divIcon({ html: pinHtml(b), className: "pin-wrap", iconSize: [44, 26], iconAnchor: [22 - shift, 13] }),
-    title: bayLabel(b),
-  });
-  m.on("add", () => m.getElement().setAttribute("aria-label", bayLabel(b)));
-  m.on("click", () => openBay(b, m.getElement()));
-  return m;
+  return makeMarker({ html: pinHtml(b), cls: "pin-wrap", w: 44, h: 26, label: bayLabel(b), lat: b.lat, lng: b.lng, shift, onClick: (el) => openBay(b, el) });
 }
 
 function clusterMarker(c) {
   const [lng, lat] = c.geometry.coordinates;
   const { cluster_id: id, point_count: n, t } = c.properties;
   const size = n > 99 ? 48 : 40;
-  const label = `${nf.format(n)} bays here. Press Enter to zoom in.`;
-  const m = L.marker([lat, lng], {
-    icon: L.divIcon({ html: `<div class="cluster${t > n / 2 ? " mostly-ticket" : ""}">${nf.format(n)}</div>`, className: "", iconSize: [size, size] }),
-    title: label,
+  return makeMarker({
+    html: `<div class="cluster${t > n / 2 ? " mostly-ticket" : ""}">${nf.format(n)}</div>`, cls: "", w: size, h: size,
+    label: `${nf.format(n)} bays here. Press Enter to zoom in.`, lat, lng,
+    onClick: () => lookAt(lat, lng, Math.min(index.getClusterExpansionZoom(id), 18)),
   });
-  m.on("add", () => m.getElement().setAttribute("aria-label", label));
-  m.on("click", () => map.setView([lat, lng], Math.min(index.getClusterExpansionZoom(id), 18)));
-  return m;
+}
+
+// Tilted, the map's own bounds reach the horizon and would put hundreds of far tags on the page,
+// so only the lower part of the screen counts.
+function viewBounds() {
+  if (map.getPitch() < 5) return map.getBounds();
+  const { clientWidth: w, clientHeight: h } = map.getCanvas();
+  const bounds = new maplibregl.LngLatBounds();
+  for (const pt of [[0, h], [w, h], [0, h * 0.3], [w, h * 0.3]]) bounds.extend(map.unproject(pt));
+  return bounds;
 }
 
 function render() {
   if (!index || !started) return;
-  const b = map.getBounds().pad(0.25);
-  const zoom = Math.min(Math.round(map.getZoom()), 18);
+  const b = viewBounds();
+  const padX = (b.getEast() - b.getWest()) * 0.25;
+  const padY = (b.getNorth() - b.getSouth()) * 0.25;
+  const zoom = Math.min(Math.round(tileZoom()), 18);
   const keep = new Set();
-  for (const item of index.getClusters([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], zoom)) {
+  for (const item of index.getClusters([b.getWest() - padX, b.getSouth() - padY, b.getEast() + padX, b.getNorth() + padY], zoom)) {
     const isCluster = item.properties.cluster;
     const key = isCluster ? `c${item.properties.cluster_id}` : `b${item.properties.i}`;
     keep.add(key);
     if (live.has(key)) continue;
     const m = isCluster ? clusterMarker(item) : bayMarker(bays[item.properties.i]);
     live.set(key, m);
-    layer.addLayer(m);
+    m.addTo(map);
   }
   for (const [key, m] of live) {
-    if (!keep.has(key)) { layer.removeLayer(m); live.delete(key); }
+    if (!keep.has(key)) { m.remove(); live.delete(key); }
   }
   markPicked();
 }
 
 function markPicked() {
-  for (const m of live.values()) m._icon?.classList.remove("pin-picked");
-  if (picked != null) live.get(`b${picked}`)?._icon?.classList.add("pin-picked");
+  for (const m of live.values()) m.getElement().classList.remove("pin-picked");
+  if (picked != null) live.get(`b${picked}`)?.getElement().classList.add("pin-picked");
 }
 
 let frame = 0;
@@ -140,7 +207,7 @@ function applyFilters() {
   matched = Logic.isFiltering(filters) ? bays.filter((b) => Logic.matches(b, filters, m)) : bays;
   index = new Supercluster({ radius: 50, extent: 256, maxZoom: 17, minPoints: 2, map: (p) => ({ t: p.t }), reduce: (a, p) => { a.t += p.t; } });
   index.load(matched.map((b) => b.pt));
-  layer.clearLayers();
+  for (const m of live.values()) m.remove();
   live.clear();
   render();
   updateChrome();
@@ -264,6 +331,18 @@ function closedLines(b) {
   return [...seen.keys()].slice(0, 4).join("; ") + (seen.size > 4 ? "; more on the sign" : "");
 }
 
+// Opens a pre-filled GitHub issue, so reports cost nothing to run. Only the bay's own details go in it.
+function reportUrl(b, d) {
+  const body = [
+    `Bay at ${b.lat.toFixed(5)}, ${b.lng.toFixed(5)} (https://www.google.com/maps/search/?api=1&query=${b.lat},${b.lng})`,
+    `Type: ${WORDS[b.category]}${b.max_stay ? `, ${Logic.stayWords(b.max_stay)}` : ""}`,
+    `Council sign text: ${b.hours_text || "(none)"}`,
+    `The app said: ${d.head}. ${d.sub}`,
+    "", "What the sign on the street says (a photo helps):", "",
+  ].join("\n");
+  return `${REPO}/issues/new?title=${encodeURIComponent(d.unknown ? "Missing hours for a bay" : "Wrong bay details")}&body=${encodeURIComponent(body)}`;
+}
+
 function openBay(b, from, quiet = false) {
   picked = b.i;
   markPicked();
@@ -286,7 +365,7 @@ function openBay(b, from, quiet = false) {
     ${filters.later ? `<p class="when-note">Showing ${esc(Logic.momentLabel(m))}, Adelaide time.</p>` : ""}
     ${directionsHtml(b)}
     <ul class="facts">${facts.map(([k, v]) => `<li><span>${k}</span><span>${esc(v)}</span></li>`).join("")}</ul>
-    <p class="fine">Always read the sign at the bay too. Event days, works and public holidays can change the rules.</p>`,
+    <p class="fine">Always read the sign at the bay too. Event days, works and public holidays can change the rules. <a href="${reportUrl(b, d)}" target="_blank" rel="noopener">${d.unknown ? "Know what this sign says? Tell us" : "Wrong? Report this bay"}</a>.</p>`,
   { focus: !quiet, from });
 }
 
@@ -466,10 +545,10 @@ function goTo(lat, lon, name) {
   hideResults();
   closeSheet();
   searchPin?.remove();
-  searchPin = L.marker([lat, lon], {
-    icon: L.divIcon({ html: '<div class="target"></div>', className: "", iconSize: [26, 26] }), interactive: false, keyboard: false,
-  }).addTo(map);
-  map.setView([lat, lon], 18);
+  const dot = document.createElement("div");
+  dot.className = "target";
+  searchPin = new maplibregl.Marker({ element: dot }).setLngLat([lon, lat]).addTo(map);
+  lookAt(lat, lon, 18);
   flash(`Showing bays near ${name}.`);
 }
 
@@ -524,14 +603,18 @@ let follow = false;
 let watching = false;
 let lastFix = null;
 
+const toMe = () => lookAt(lastFix[0], lastFix[1], Math.max(tileZoom(), 17));
+
 function onFix(pos) {
   $("locate-btn").classList.remove("busy");
   const firstFix = !lastFix;
   lastFix = [pos.coords.latitude, pos.coords.longitude];
   if (!me) {
-    me = L.marker(lastFix, { icon: L.divIcon({ html: '<div class="me"></div>', className: "", iconSize: [20, 20] }), interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(map);
-  } else me.setLatLng(lastFix);
-  if (follow || firstFix) map.setView(lastFix, Math.max(map.getZoom(), 17), { animate: true });
+    const dot = document.createElement("div");
+    dot.className = "me";
+    me = new maplibregl.Marker({ element: dot }).setLngLat([lastFix[1], lastFix[0]]).addTo(map);
+  } else me.setLngLat([lastFix[1], lastFix[0]]);
+  if (follow || firstFix) toMe();
 }
 
 function onFixError(err) {
@@ -561,14 +644,14 @@ function setFollow(on) {
 }
 
 $("locate-btn").onclick = () => {
-  if (lastFix) map.setView(lastFix, Math.max(map.getZoom(), 17));
+  if (lastFix) toMe();
   startWatching();
 };
 $("follow-btn").onclick = () => {
   setFollow(!follow);
   if (follow) {
     startWatching();
-    if (lastFix) map.setView(lastFix, Math.max(map.getZoom(), 17));
+    if (lastFix) toMe();
   }
 };
 // Dragging the map means you want to look around, so stop chasing the car (same as Google Maps).

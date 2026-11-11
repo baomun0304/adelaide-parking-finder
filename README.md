@@ -43,7 +43,7 @@ council ArcGIS  ->  sync/sync_parking.py (GitHub Actions, daily)  ->  frontend/d
 
 `frontend/data/status.json` records whether the council server answered, when the data was checked and last changed, and how many bays could not be read. If the council server is down, the old data stays in place and the site shows a notice.
 
-The map shows only what is on screen. About 6,000 bays are grouped with [Supercluster](https://github.com/mapbox/supercluster) and only the visible tags are ever in the page, so it stays smooth on an older phone. Leaflet and Supercluster are self-hosted in `frontend/vendor`, so the page loads from one origin and runs under a strict Content-Security-Policy (see `vercel.json`).
+The map shows only what is on screen. About 6,000 bays are grouped with [Supercluster](https://github.com/mapbox/supercluster) and only the visible tags are ever in the page, so it stays smooth on an older phone. MapLibre GL and Supercluster are self-hosted in `frontend/vendor`, so the page loads from one origin and runs under a strict Content-Security-Policy (see `vercel.json`).
 
 | File | Job |
 | --- | --- |

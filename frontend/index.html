@@ -23,7 +23,6 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='4' y='4' width='56' height='56' rx='10' fill='%23fff' stroke='%230f7a3d' stroke-width='5'/%3E%3Ctext x='32' y='46' font-family='Arial' font-weight='700' font-size='38' text-anchor='middle' fill='%230f7a3d'%3EP%3C/text%3E%3C/svg%3E">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<link rel="stylesheet" href="vendor/leaflet.css">
 <link rel="stylesheet" href="vendor/maplibre-gl.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -60,6 +59,12 @@
   <button id="follow-btn" class="tool" title="Follow me while driving" aria-label="Follow me" aria-pressed="false">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 19.5 21 12 16.8 4.5 21z"/></svg>
   </button>
+  <button id="sat-btn" class="tool" title="Satellite view" aria-label="Satellite view" aria-pressed="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3-9 5 9 5 9-5z" fill="none"/><path d="m3 12.5 9 5 9-5" fill="none"/><path d="m3 17 9 5 9-5" fill="none"/></svg>
+  </button>
+  <button id="tilt-btn" class="tool" title="3D buildings" aria-label="3D buildings" aria-pressed="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 8 4.5v10l-8 4.5-8-4.5V7z" fill="none"/><path d="m4 7 8 4.5L20 7M12 11.5v10" fill="none"/></svg>
+  </button>
   <button id="theme-btn" class="tool" title="Light or dark map" aria-label="Switch light or dark map">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/></svg>
   </button>
@@ -84,9 +89,7 @@
   <div id="sheet-body"></div>
 </section>
 
-<script src="vendor/leaflet.js"></script>
 <script src="vendor/maplibre-gl.js"></script>
-<script src="vendor/leaflet-maplibre-gl.js"></script>
 <script src="vendor/supercluster.min.js"></script>
 <script src="logic.js"></script>
 <script src="app.js"></script>
