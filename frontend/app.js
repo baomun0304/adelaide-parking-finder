@@ -524,28 +524,35 @@ let follow = false;
 let watching = false;
 let lastFix = null;
 
+function onFix(pos) {
+  $("locate-btn").classList.remove("busy");
+  const firstFix = !lastFix;
+  lastFix = [pos.coords.latitude, pos.coords.longitude];
+  if (!me) {
+    me = L.marker(lastFix, { icon: L.divIcon({ html: '<div class="me"></div>', className: "", iconSize: [20, 20] }), interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(map);
+  } else me.setLatLng(lastFix);
+  if (follow || firstFix) map.setView(lastFix, Math.max(map.getZoom(), 17), { animate: true });
+}
+
+function onFixError(err) {
+  $("locate-btn").classList.remove("busy");
+  if (err.code === 1) {
+    watching = false;
+    setFollow(false);
+    flash("Location is blocked. Allow it in your browser settings to use this.");
+  } else if (!lastFix) {
+    flash("Still looking for your location. Moving outside helps.");
+  } // with a fix already, a slow update is fine: keep the dot where it is
+}
+
+// Two requests: a fast rough fix (Wi-Fi or a recent one) puts the dot on the map in a second or two,
+// while the slow GPS watch refines it. Asking only for GPS can take minutes indoors or on a laptop.
 function startWatching() {
   if (watching || !navigator.geolocation) return;
   watching = true;
   $("locate-btn").classList.add("busy");
-  navigator.geolocation.watchPosition(
-    (pos) => {
-      $("locate-btn").classList.remove("busy");
-      const firstFix = !lastFix;
-      lastFix = [pos.coords.latitude, pos.coords.longitude];
-      if (!me) {
-        me = L.marker(lastFix, { icon: L.divIcon({ html: '<div class="me"></div>', className: "", iconSize: [20, 20] }), interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(map);
-      } else me.setLatLng(lastFix);
-      if (follow || firstFix) map.setView(lastFix, Math.max(map.getZoom(), 17), { animate: true });
-    },
-    (err) => {
-      $("locate-btn").classList.remove("busy");
-      watching = false;
-      setFollow(false);
-      flash(err.code === 1 ? "Location is blocked. Allow it in your browser settings to use this." : "Couldn't find your location just now.");
-    },
-    { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
-  );
+  navigator.geolocation.getCurrentPosition((pos) => { if (!lastFix) onFix(pos); }, () => {}, { enableHighAccuracy: false, maximumAge: 600000, timeout: 10000 });
+  navigator.geolocation.watchPosition(onFix, onFixError, { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
 }
 
 function setFollow(on) {
