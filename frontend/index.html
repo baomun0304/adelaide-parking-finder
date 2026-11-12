@@ -59,38 +59,46 @@
   <button id="follow-btn" class="tool" title="Follow me while driving" aria-label="Follow me" aria-pressed="false">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 19.5 21 12 16.8 4.5 21z"/></svg>
   </button>
-  <button id="sat-btn" class="tool" title="Satellite view" aria-label="Satellite view" aria-pressed="false">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3-9 5 9 5 9-5z" fill="none"/><path d="m3 12.5 9 5 9-5" fill="none"/><path d="m3 17 9 5 9-5" fill="none"/></svg>
-  </button>
-  <button id="tilt-btn" class="tool" title="3D buildings" aria-label="3D buildings" aria-pressed="false">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 8 4.5v10l-8 4.5-8-4.5V7z" fill="none"/><path d="m4 7 8 4.5L20 7M12 11.5v10" fill="none"/></svg>
-  </button>
-  <button id="theme-btn" class="tool" title="Light or dark map" aria-label="Switch light or dark map">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/></svg>
-  </button>
+  <div class="tool-wrap">
+    <button id="layers-btn" class="tool" title="Map style" aria-label="Map style: satellite, 3D, dark" aria-haspopup="true" aria-expanded="false" aria-controls="layers-menu">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3-9 5 9 5 9-5z" fill="none"/><path d="m3 12.5 9 5 9-5" fill="none"/><path d="m3 17 9 5 9-5" fill="none"/></svg>
+    </button>
+    <div id="layers-menu" class="menu" role="menu" aria-label="Map style" hidden>
+      <button type="button" role="menuitemradio" data-layer="map" aria-checked="true">Map</button>
+      <button type="button" role="menuitemradio" data-layer="satellite" aria-checked="false">Satellite</button>
+      <hr>
+      <button type="button" role="menuitemcheckbox" data-layer="tilt" aria-pressed="false">3D buildings</button>
+      <button type="button" role="menuitemcheckbox" data-layer="dark" aria-pressed="false">Dark mode</button>
+    </div>
+  </div>
   <button id="key-btn" class="tool" title="What the signs mean, and about the data" aria-label="What the signs mean, and about the data">
     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none"/><path d="M12 11v6" fill="none"/><circle cx="12" cy="7.6" r="1.1"/></svg>
   </button>
 </nav>
 
-<div class="dock">
+<section id="panel" class="panel" aria-labelledby="panel-title">
+  <h2 id="panel-title" class="panel-title">Find a park</h2>
   <div id="status" class="status" role="status" aria-live="polite"></div>
-  <div class="chips" role="group" aria-label="Quick filters">
-    <button id="chip-free" class="chip" aria-pressed="false">Free now</button>
-    <button class="chip" data-need="60" aria-pressed="false">1 hr+</button>
-    <button class="chip" data-need="120" aria-pressed="false">2 hr+</button>
-    <button class="chip" data-need="240" aria-pressed="false">4 hr+</button>
-    <button id="chip-more" class="chip chip-strong" aria-haspopup="dialog">Filters<span id="chip-badge" class="badge" hidden></span></button>
+  <div class="panel-q">
+    <span class="q-label" id="need-label">How long?</span>
+    <div id="quick-need" class="opts quick" role="group" aria-labelledby="need-label"></div>
   </div>
-</div>
+  <div class="panel-row">
+    <button type="button" class="opt" data-set="free" aria-pressed="false">Free only</button>
+    <button type="button" id="when-btn" class="opt" aria-pressed="false" title="Parking later? Pick a day and time">Now</button>
+    <button type="button" id="more-btn" class="opt" aria-expanded="false" aria-controls="more">More<span id="more-badge" class="badge" hidden></span></button>
+    <button type="button" id="list-btn" class="opt list-opt">List</button>
+  </div>
+  <div id="more" class="more" hidden></div>
+</section>
 
 <section id="sheet" class="sheet" role="dialog" aria-labelledby="sheet-title" hidden>
+  <div class="sheet-grip" aria-hidden="true"></div>
   <button class="sheet-close" aria-label="Close">&times;</button>
   <div id="sheet-body"></div>
 </section>
 
 <script src="vendor/maplibre-gl.js"></script>
-<script src="vendor/supercluster.min.js"></script>
 <script src="logic.js"></script>
 <script src="app.js"></script>
 </body>

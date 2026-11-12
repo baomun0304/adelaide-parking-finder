@@ -209,8 +209,12 @@
     return true;
   }
 
+  // Can this vehicle legally park in this kind of bay at all, ignoring the clock?
+  const isStopZone = (bay) => NEVER.has(bay.category);
+  const canPark = (bay, vehicle) => !NEVER.has(bay.category) && !(PERMIT_ONLY[vehicle] || []).includes(bay.category);
+
   function matches(bay, f, m) {
-    if (NEVER.has(bay.category) || PERMIT_ONLY[f.vehicle].includes(bay.category)) return false;
+    if (!canPark(bay, f.vehicle)) return false;
     const timed = TIMED.has(bay.category);
     if (f.sureOnly && timed && !bay.windows) return false;
     if (bay.category === "unrestricted") return true;
@@ -222,6 +226,6 @@
 
   return {
     DAY_NAMES, DEFAULT_FILTERS, adelaideNow, addMinutes, clockText, momentLabel, stayWords, stayLabel,
-    daysText, stateAt, nextStart, describe, isFiltering, matches, whenText,
+    daysText, stateAt, nextStart, describe, isFiltering, matches, whenText, canPark, isStopZone,
   };
 });

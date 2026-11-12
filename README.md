@@ -15,7 +15,8 @@ Live: https://adelaide-parking-finder.vercel.app
   - *When*: now, or any day and time in the coming week.
   - *Vehicle*: car, motorbike or disability permit. You only see bays you can legally use.
   - *Only bays with a readable sign* hides the bays marked "Check the sign".
-  - Quick chips on the map (Free now, 1 hr+, 2 hr+, 4 hr+) set the same filters in one tap.
+  - A panel that is always on screen (bottom of a phone, left side of a computer) shows how many places match and sets the main filters in one tap: how long, free only, now or later. More holds the vehicle, a later day and time, readable-signs-only and the stop zones.
+  - A first-visit question (how long do you need?) so the map opens already filtered, and a List of the closest matching places.
 - **Follow me** keeps the map centred on the car. Dragging the map turns it off, like Google Maps.
 - Light and dark map, large touch targets, readable font (Atkinson Hyperlegible), works one-handed.
 - Works offline once opened: the app, the last parking data and the map tiles you have looked at are kept on the phone. Add it to the home screen and it opens like an app.
@@ -43,12 +44,12 @@ council ArcGIS  ->  sync/sync_parking.py (GitHub Actions, daily)  ->  frontend/d
 
 `frontend/data/status.json` records whether the council server answered, when the data was checked and last changed, and how many bays could not be read. If the council server is down, the old data stays in place and the site shows a notice.
 
-The map shows only what is on screen. About 6,000 bays are grouped with [Supercluster](https://github.com/mapbox/supercluster) and only the visible tags are ever in the page, so it stays smooth on an older phone. MapLibre GL and Supercluster are self-hosted in `frontend/vendor`, so the page loads from one origin and runs under a strict Content-Security-Policy (see `vercel.json`).
+The bays are one GPU-drawn MapLibre layer with built-in clustering (worked out off the main thread), not hundreds of page elements, so panning stays smooth on an older phone. The tag pictures are drawn on a canvas the first time the map needs each one. MapLibre GL is self-hosted in `frontend/vendor`, so the page loads from one origin and runs under a strict Content-Security-Policy (see `vercel.json`).
 
 | File | Job |
 | --- | --- |
 | `frontend/logic.js` | Pure rules: Adelaide time, what applies to a bay at a moment, the filters. Runs in the browser and in Node. |
-| `frontend/app.js` | Map, chips, filter sheet, search, banners. |
+| `frontend/app.js` | Map layers, filter panel, sheets, list, search, banners. |
 | `frontend/sw.js` | Offline: caches the app, the data and map tiles. |
 | `sync/hours.py` | Reads council sign text into rules. |
 

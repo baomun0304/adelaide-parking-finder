@@ -138,3 +138,17 @@ test("a bay with no hours of its own uses the neighbouring sign for time filters
   const lone = { category: "free", max_stay: 120, windows: null };
   assert.equal(L.matches(lone, { ...L.DEFAULT_FILTERS, free: true }, { day: 3, mins: 23 * 60 }), true);
 });
+
+test("canPark hides kerb space nobody can use, and permit bays from people without the permit", () => {
+  assert.equal(L.canPark({ category: "loading" }, "car"), false);
+  assert.equal(L.canPark({ category: "no-parking" }, "moto"), false);
+  assert.equal(L.canPark({ category: "free" }, "car"), true);
+  assert.equal(L.canPark({ category: "disabled" }, "car"), false);
+  assert.equal(L.canPark({ category: "disabled" }, "disabled"), true);
+  assert.equal(L.canPark({ category: "motorcycle" }, "moto"), true);
+});
+
+test("isStopZone picks out kerbs where nobody may park", () => {
+  assert.equal(L.isStopZone({ category: "taxi" }), true);
+  assert.equal(L.isStopZone({ category: "residential" }), false);
+});
