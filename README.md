@@ -2,7 +2,15 @@
 
 A phone-first map of every on-street parking bay in the Adelaide CBD, built so a driver can glance at it and know where they can park right now.
 
-Live: https://adelaide-parking-finder.vercel.app
+Live: https://adelaide-parking-finder.vercel.app (open it on your phone, or add it to the home screen)
+
+<p>
+  <img src="docs/screenshots/phone-welcome.png" width="240" alt="First visit asks how long you need to park">
+  <img src="docs/screenshots/phone-map.png" width="240" alt="Map filtered to free bays for 2 hours, with the filter panel at the bottom">
+  <img src="docs/screenshots/phone-bay.png" width="240" alt="One bay: what applies right now, the sign text and directions">
+</p>
+
+![On a computer the filters sit in a panel on the left](docs/screenshots/desktop.png)
 
 ## What it does
 
@@ -78,3 +86,7 @@ CI runs both on every push (`.github/workflows/ci.yml`).
 ## Data
 
 Parking data: City of Adelaide, licensed CC BY 4.0 (data.sa.gov.au, "On-Street Parking Zones"). Base map: OpenFreeMap, OpenMapTiles, OpenStreetMap contributors. Search: OpenStreetMap Nominatim (what you type is sent to them, only when you press search). This is an independent project, not affiliated with the council. Always follow the sign on the street.
+
+## License
+
+Code: MIT, see [LICENSE](LICENSE). Parking data: City of Adelaide, CC BY 4.0. Map: OpenFreeMap, OpenMapTiles and OpenStreetMap contributors; satellite imagery Esri.
