@@ -133,8 +133,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* the panel: what you are looking for, always in view (bottom on a phone, left column on a computer) */
 .panel {
   position: fixed; z-index: 1000; left: 0; right: 0; bottom: 0;
-  max-height: 78vh; max-height: 78dvh; overflow: auto; overscroll-behavior: contain;
-  padding: 12px var(--gap) calc(12px + env(safe-area-inset-bottom));
+  padding: 18px var(--gap) calc(12px + env(safe-area-inset-bottom));
   background: var(--card); border-radius: 20px 20px 0 0;
   box-shadow: 0 -8px 30px -10px rgba(0, 0, 0, .35);
   display: flex; flex-direction: column; gap: 10px;
@@ -155,7 +154,15 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .panel-row { display: flex; gap: 8px; }
 .panel-row .opt { flex: 1; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .panel-row #when-btn { flex: 1.4; }
-.more { border-top: 1px solid var(--line); padding-top: 4px; }
+.more { border-top: 1px solid var(--line); padding-top: 4px; max-height: 46vh; max-height: max(160px, min(46dvh, calc(100dvh - 420px))); overflow: auto; overscroll-behavior: contain; }
+.panel-grip { position: absolute; top: 0; left: 0; right: 0; height: 22px; touch-action: none; cursor: grab; }
+.panel-grip::before {
+  content: ""; position: absolute; top: 7px; left: 50%; width: 40px; height: 4px;
+  margin-left: -20px; border-radius: 4px; background: var(--line);
+}
+.panel.dragging { transition: none; }
+.panel { transition: transform .2s; }
+.more-done { width: 100%; margin: 14px 0 4px; }
 .more .later { margin-top: 10px; }
 .more[hidden] { display: none; }
 .opt[aria-expanded="true"] { border-color: var(--ink); }
@@ -262,7 +269,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
     left: var(--gap); right: auto; width: 380px; border-radius: 20px;
     top: calc(var(--gap) + 60px + env(safe-area-inset-top)); bottom: var(--gap); max-height: none;
   }
-  .panel { padding: 18px; gap: 12px; }
+  .panel { padding: 18px; gap: 12px; overflow: auto; }
+  .more { max-height: none; overflow: visible; }
+  .panel-grip, .more-done { display: none; }
   .panel-title { display: block; }
   .sheet { box-shadow: var(--shadow); }
   .sheet-grip { display: none; }

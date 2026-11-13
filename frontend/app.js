@@ -286,6 +286,7 @@ map.on("click", (e) => {
   toggleLayersMenu(false);
   hideResults();
   if (sheetKind === "welcome") return; // the welcome question is answered with its own buttons
+  if (foldMore()) return; // first tap on the map just folds the options away
   const f = featureAt(e.point);
   if (!f) { closeSheet(); return; }
   if (f.layer.id === "clusters") {
@@ -383,7 +384,8 @@ $("more").innerHTML = `
     <p class="hint">Motorbikes and permit holders also see the normal bays they can use.</p></fieldset>
   <label class="toggle"><input type="checkbox" id="sure-only"><span>Only bays with a readable sign</span></label>
   <label class="toggle"><input type="checkbox" id="all-kinds"><span>Also show loading zones, taxi ranks and no-parking kerbs</span></label>
-  <p class="hint">We have no prices, only whether a bay is free or ticketed.</p>`;
+  <p class="hint">We have no prices, only whether a bay is free or ticketed.</p>
+  <button type="button" id="more-done" class="btn primary more-done">Done</button>`;
 
 // Every filter control on the page, in the panel or a sheet, shows the same state.
 function syncFilters() {
@@ -402,13 +404,17 @@ function syncFilters() {
   $("all-kinds").checked = filters.allKinds;
   const label = !bays.length ? "Show the map" : matched.length ? `Show ${nf.format(matched.length)} places` : "No places match";
   if ($("w-go")) $("w-go").textContent = label;
+  $("more-done").textContent = matched.length ? `Done, show ${nf.format(matched.length)} places` : "Done";
 }
 
 function showMore(open) {
   $("more").hidden = !open;
   $("more-btn").setAttribute("aria-expanded", open);
+  if (!open) $("more").scrollTop = 0;
   setPanelHeight();
 }
+// On a phone the extra options fold away again: Done, a swipe down on the panel, or a tap on the map.
+const foldMore = () => { if (!DESKTOP.matches && !$("more").hidden) { showMore(false); return true; } return false; };
 
 function onFilterClick(e) {
   const opt = e.target.closest("[data-set]");
@@ -426,6 +432,25 @@ $("panel").addEventListener("click", (e) => {
   if (act === "now") setFilter({ later: null });
 });
 $("more-btn").onclick = () => showMore($("more").hidden);
+$("more-done").onclick = () => { showMore(false); $("more-btn").focus({ preventScroll: true }); };
+
+let panelDrag = null;
+const grip = document.querySelector(".panel-grip");
+grip.addEventListener("pointerdown", (e) => { panelDrag = e.clientY; $("panel").classList.add("dragging"); grip.setPointerCapture(e.pointerId); });
+grip.addEventListener("pointermove", (e) => {
+  if (panelDrag != null) $("panel").style.transform = `translateY(${Math.max(0, e.clientY - panelDrag) / 2}px)`;
+});
+const endPanelDrag = (e) => {
+  if (panelDrag == null) return;
+  const moved = e.clientY - panelDrag;
+  panelDrag = null;
+  $("panel").classList.remove("dragging");
+  $("panel").style.transform = "";
+  if (moved > 40) foldMore();
+  else if (moved < -40 && $("more").hidden) showMore(true); // a swipe up opens the extra options
+};
+grip.addEventListener("pointerup", endPanelDrag);
+grip.addEventListener("pointercancel", endPanelDrag);
 $("when-btn").onclick = () => {
   if (filters.later) { setFilter({ later: null }); return; }
   setFilter({ later: nextQuarter() });
@@ -482,7 +507,7 @@ function closeSheet() {
 sheet.querySelector(".sheet-close").onclick = closeSheet;
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
-  if (!$("layers-menu").hidden) { toggleLayersMenu(false); $("layers-btn").focus(); } else if (!$("search-results").hidden) hideResults(); else closeSheet();
+  if (!$("layers-menu").hidden) { toggleLayersMenu(false); $("layers-btn").focus(); } else if (!$("search-results").hidden) hideResults(); else if (sheetKind) closeSheet(); else foldMore();
 });
 
 // Drag the handle down to close, like any phone sheet.
