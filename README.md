@@ -10,6 +10,7 @@ Live: https://adelaide-parking-finder.vercel.app (open it on your phone, or add 
   <img src="docs/screenshots/phone-welcome.png" width="240" alt="First visit asks how long you need to park">
   <img src="docs/screenshots/phone-map.png" width="240" alt="Map filtered to free bays for 2 hours, with the filter panel at the bottom">
   <img src="docs/screenshots/phone-bay.png" width="240" alt="One bay: what applies right now, the sign text and directions">
+  <img src="docs/screenshots/phone-drive.png" width="240" alt="Drive here: a turn banner over the parking map and a Taken? Next bay button">
 </p>
 
 ![On a computer the filters sit in a panel on the left](docs/screenshots/desktop.png)
