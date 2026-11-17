@@ -152,3 +152,11 @@ test("isStopZone picks out kerbs where nobody may park", () => {
   assert.equal(L.isStopZone({ category: "taxi" }), true);
   assert.equal(L.isStopZone({ category: "residential" }), false);
 });
+
+test("a stricter sign that starts next shortens the stay instead of saying no limit", () => {
+  // 2 hr 9am-2:30pm then 15 min 2:30pm-4pm, weekdays (the real sign at 138.588959,-34.927619)
+  const bay = { category: "free", max_stay: 120, windows: [[WK, 540, 870, 120, false], [WK, 870, 960, 15, false]] };
+  const d = L.describe(bay, { day: 0, mins: 14 * 60 });
+  assert.equal(d.head, "Free for 45 min");
+  assert.match(d.note, /15 min limit from 2:30pm, so move by 2:45pm/);
+});

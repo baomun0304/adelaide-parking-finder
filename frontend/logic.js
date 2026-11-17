@@ -166,12 +166,21 @@
       const left = end - m.mins;
       const next = stateAt(bay, addMinutes(m, left));
       let note;
+      let canStay = stay;
       if (stay < left) note = `Move your car by ${clockText(m.mins + stay)}.`;
       else if (next.kind === "closed") note = `${next.label} from ${clockText(end)}, so move before then.`;
-      else note = `After ${clockText(end)} there's no limit.`;
+      else if (next.kind === "limit") {
+        // Another sign takes over at `end` (for example 15 min from 2:30pm): its limit runs from then.
+        const [, , , nextStay, nextPaid] = next.w;
+        canStay = Math.min(stay, left + nextStay);
+        note = nextPaid && !paid
+          ? `Ticket from ${clockText(end)}, so move by then or pay.`
+          : `${stayWords(nextStay)} limit from ${clockText(end)}, so move by ${clockText(Math.min(m.mins + stay, end + nextStay))}.`;
+        if (nextPaid && !paid) canStay = Math.min(canStay, left);
+      } else note = `After ${clockText(end)} there's no limit.`;
       return paid
-        ? { tone: "paid", head: `Ticket, ${stayWords(stay)} max`, sub: `Pay at the machine or in an app, until ${clockText(end)}.`, note, blocksFree: true }
-        : { tone: "ok", head: `Free for ${stayWords(stay)}`, sub: `Time limit applies until ${clockText(end)}.`, note };
+        ? { tone: "paid", head: `Ticket, ${stayWords(canStay)} max`, sub: `Pay at the machine or in an app, until ${clockText(end)}.`, note, blocksFree: true }
+        : { tone: "ok", head: `Free for ${stayWords(canStay)}`, sub: `Time limit applies until ${clockText(end)}.`, note };
     }
     const next = nextStart(bay, m);
     let sub = "This sign doesn't apply right now.";

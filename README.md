@@ -40,7 +40,8 @@ A wrong "you can park here" costs someone a real fine, so the app says "Check th
 
 - Council sign text often holds several signs in one field, for example "No Stopping Monday to Friday 7am-10am 3 hr Ticket Monday to Friday 10am-7pm Saturday & Sunday 7am-7pm". `sync/hours.py` splits it into signs and reads each one: its days, times, time limit, whether it is a ticket, and the periods when you cannot park at all (No Stopping, Bus Lane, Loading, Taxi, Residents only, including "At all other times"). Different limits on weekdays and weekends are kept apart.
 - If any part of the text cannot be read, or the sign and the council layer disagree, the bay is marked "Check the sign".
-- About 73% of free and ticket bays have readable hours (3,000 of 4,123 on 10 Nov 2026). Most of the rest have no sign text at all in the council data.
+- About 92% of free and ticket bays have readable hours (3,988 of 4,327 on 17 Nov 2026). Most of the rest have no sign text at all in the council data.
+- The council's server sometimes serves a whole layer with only its ids and no sign text. The sync notices and keeps the last full copy of that layer (`sync/cache/`), so a daily run never wipes out the signs.
 - All rules use Adelaide time, whatever time the phone says.
 - The app shows when the data was last checked, and warns if the daily update stops for more than 3 days or the council server is down.
 - Public holidays and event days are not modelled. The sign on the street always wins.

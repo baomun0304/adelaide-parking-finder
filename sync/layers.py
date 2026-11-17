@@ -34,6 +34,7 @@ LAYERS = [
     _layer("4_Hr_Weekday_Free_Parking", "free", "weekday", 240),
     _layer("3_Hr_Weekday_Free_Parking", "free", "weekday", 180),
     _layer("2_Hr_Free_Weekday_Parking", "free", "weekday", 120),  # the council's name really is in this order
+    _layer("1_Hr_Weekday_Free_Parking", "free", "weekday", 60),
     _layer("30_Min_Weekday_Free_Parking", "free", "weekday", 30),
     _layer("15_Min_Weekday_Free_Parking", "free", "weekday", 15),
     _layer("6_Hr_Weekend_Free_Parking", "free", "weekend", 360),

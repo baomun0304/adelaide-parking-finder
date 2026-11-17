@@ -1,12 +1,15 @@
 {
   "ok": true,
   "since": "2026-11-05T22:56:49+00:00",
-  "data_updated": "2026-11-10T13:45:59+00:00",
-  "bays": 5929,
+  "data_updated": "2026-11-17T04:35:23+00:00",
+  "bays": 6133,
   "failed_layers": 0,
   "error": null,
-  "unreadable_hours": 15,
-  "timed_bays": 4123,
-  "unreadable_bays": 1125,
-  "checked": "2026-11-17T01:07:58+00:00"
+  "unreadable_hours": 16,
+  "timed_bays": 4327,
+  "unreadable_bays": 339,
+  "checked": "2026-11-17T04:35:23+00:00",
+  "kept_layers": [
+    "2_Hr_Free_Weekday_Parking"
+  ]
 }

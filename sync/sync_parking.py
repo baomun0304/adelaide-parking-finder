@@ -19,6 +19,25 @@ from layers import LAYERS
 
 SERVICE_ROOT = "https://gis.cityofadelaide.com.au/server/rest/services/External_Facing_Data"
 DATA_DIR = Path(__file__).resolve().parent.parent / "frontend" / "data"
+# Last full copy of each timed layer. The council server sometimes serves a layer with only its ids
+# (no sign text, spaces or angle); then we keep the last copy that had them instead of losing the signs.
+CACHE_DIR = Path(__file__).resolve().parent / "cache"
+SIGN_FIELDS = ("CLASS1", "CLASS2", "CLASS3", "CLASS4", "NO_SPACES", "ZONEANGLE", "Exemptions")
+
+
+def has_sign_fields(raw):
+    return any("CLASS1" in (item.get("attributes") or {}) for item in raw)
+
+
+def save_layer_cache(name, raw):
+    CACHE_DIR.mkdir(exist_ok=True)
+    slim = [{"attributes": {k: item["attributes"].get(k) for k in SIGN_FIELDS}, "geometry": item["geometry"]} for item in raw]
+    (CACHE_DIR / f"{name}.json").write_text(json.dumps(slim, separators=(",", ":")))
+
+
+def load_layer_cache(name):
+    path = CACHE_DIR / f"{name}.json"
+    return json.loads(path.read_text()) if path.exists() else None
 
 
 def build_feature(raw, layer):
@@ -46,13 +65,25 @@ def build_feature(raw, layer):
 
 
 HINT_DEGREES = 6e-5  # about 6 m: the next bay along the same kerb
+SAME_SPOT = 1e-6     # the council often maps the weekday and weekend sign of one bay as two points in the same place
+
+
+def drop_twins(features):
+    """The council maps the weekday and weekend sign of many bays as two points in the same place.
+    When one copy has no sign text and the other at the very same spot (same time limit) does, the
+    empty copy only adds a question mark on top of a readable tag, so it is dropped."""
+    readable = {(round(f["geometry"]["coordinates"][0], 6), round(f["geometry"]["coordinates"][1], 6), f["properties"]["max_stay"])
+                for f in features if f["properties"]["category"] in ("free", "ticket") and f["properties"]["windows"]}
+    return [f for f in features
+            if not (f["properties"]["category"] in ("free", "ticket") and not f["properties"]["hours_text"]
+                    and (round(f["geometry"]["coordinates"][0], 6), round(f["geometry"]["coordinates"][1], 6), f["properties"]["max_stay"]) in readable)]
 
 
 def add_hints(features):
     """Bays with no sign text in the council data borrow the sign of the nearest bay beside them.
 
-    The sheet says "probably the same" and the pin keeps its question mark. The filters use the borrowed hours
-    so a late-night search is not hidden by a limit that probably is not in force.
+    The sheet says "probably the same" and the pin keeps its question mark. When the donor sits at the same
+    spot, the filters use the borrowed hours so a late-night search is not hidden by a limit that is not in force.
     """
     donors = {}
     for f in features:
@@ -75,9 +106,12 @@ def add_hints(features):
         if best:
             donor = best[1]
             p["hint"] = donor["hours_text"]
-            p["hint_windows"] = donor["windows"]
-            if donor.get("closed"):
-                p["hint_closed"] = donor["closed"]
+            # Only a sign at the very same spot is trusted for the time filters; one a few metres away
+            # can belong to a different stretch of kerb, so it is shown as a hint and nothing more.
+            if best[0] < SAME_SPOT:
+                p["hint_windows"] = donor["windows"]
+                if donor.get("closed"):
+                    p["hint_closed"] = donor["closed"]
 
 
 def _now():
@@ -87,7 +121,7 @@ def _now():
 def main():
     session = requests.Session()
     session.headers["User-Agent"] = "adelaide-parking-finder (github.com/baomun0304/adelaide-parking-finder)"
-    features, failed, unreadable = [], [], set()
+    features, failed, unreadable, kept = [], [], set(), []
     timed_bays = unreadable_bays = 0
 
     for layer in LAYERS:
@@ -97,6 +131,12 @@ def main():
             print(f"FAILED {layer['name']}: {e}", file=sys.stderr)
             failed.append(str(e).split(" for url")[0][:120])
             continue
+        if layer["category"] in ("free", "ticket") and raw:
+            if has_sign_fields(raw):
+                save_layer_cache(layer["name"], raw)
+            elif (cached := load_layer_cache(layer["name"])) is not None:
+                print(f"{layer['name']}: served without sign text, keeping the last full copy", file=sys.stderr)
+                raw, kept = cached, kept + [layer["name"]]
         for item in raw:
             feature = build_feature(item, layer)
             props = feature["properties"]
@@ -108,6 +148,11 @@ def main():
             features.append(feature)
         print(f"{layer['name']}: {len(raw)}")
 
+    before = len(features)
+    features = drop_twins(features)
+    dropped = before - len(features)
+    timed_bays -= dropped
+    unreadable_bays -= dropped
     add_hints(features)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     status_path = DATA_DIR / "status.json"
@@ -138,6 +183,7 @@ def main():
         "timed_bays": timed_bays if ok else old.get("timed_bays", 0),
         "unreadable_bays": unreadable_bays if ok else old.get("unreadable_bays", 0),
         "checked": _now(),
+        "kept_layers": kept,
     }
     status_path.write_text(json.dumps(status, indent=2) + "\n")
 

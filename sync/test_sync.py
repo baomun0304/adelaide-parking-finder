@@ -67,8 +67,8 @@ class Hours(unittest.TestCase):
 
 class Layers(unittest.TestCase):
     def test_registry(self):
-        self.assertEqual(len(LAYERS), 34)  # every parking layer in the council web map
-        self.assertEqual(len({l["name"] for l in LAYERS}), 34)
+        self.assertEqual(len(LAYERS), 35)  # every parking layer the council publishes (the web map omits 1 hr weekday free)
+        self.assertEqual(len({l["name"] for l in LAYERS}), 35)
         for layer in LAYERS:
             self.assertIn(layer["category"], VALID_CATEGORIES)
             if layer["category"] in ("free", "ticket"):
@@ -135,3 +135,22 @@ class HintTests(unittest.TestCase):
         self.assertEqual(empty["properties"]["hint"], donor["properties"]["hours_text"])
         self.assertNotIn("hint", far["properties"])
         self.assertIsNone(empty["properties"]["windows"])  # a hint never becomes a rule
+
+
+class TwinAndCacheTests(unittest.TestCase):
+    def _bay(self, x, text, windows, stay=60):
+        return {"geometry": {"coordinates": [x, -34.92]},
+                "properties": {"category": "free", "max_stay": stay, "hours_text": text, "windows": windows}}
+
+    def test_a_textless_copy_of_a_readable_bay_at_the_same_spot_is_dropped(self):
+        from sync_parking import drop_twins
+        full = self._bay(138.6, "1 hr Parking Monday to Friday 8am-6pm", [[[0, 1, 2, 3, 4], 480, 1080, 60, False]])
+        twin = self._bay(138.6, None, None)
+        lone = self._bay(138.61, None, None)
+        kept = drop_twins([full, twin, lone])
+        self.assertEqual(kept, [full, lone])
+
+    def test_layer_without_sign_fields_is_detected(self):
+        from sync_parking import has_sign_fields
+        self.assertFalse(has_sign_fields([{"attributes": {"OBJECTID": 1, "CTYPE_1": "Parking"}}]))
+        self.assertTrue(has_sign_fields([{"attributes": {"CLASS1": "", "OBJECTID": 1}}]))
