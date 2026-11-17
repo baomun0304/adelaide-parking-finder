@@ -390,6 +390,8 @@ body.navigating .tools { top: calc(var(--gap) + 120px + env(safe-area-inset-top)
 .nav-eta { margin: 0; font-size: 18px; font-weight: 700; }
 .nav-backup { margin: 0; color: var(--muted); font-size: 14px; }
 .nav-actions { display: flex; gap: 8px; margin-top: 4px; }
+.nav-taken { width: 100%; min-height: 54px; font-size: 18px; margin-top: 4px; }
+.nav-taken:disabled { opacity: .55; }
 .nav-actions .btn { flex: 1; }
 .nav-actions .btn[aria-pressed="true"] { background: var(--paper); }
 .nav-actions .btn.end { background: var(--red); border-color: var(--red); color: #fff; }

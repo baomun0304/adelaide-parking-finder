@@ -545,7 +545,7 @@ function directionsHtml(b) {
   const g = `https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lng}&travelmode=driving`;
   const a = `https://maps.apple.com/?daddr=${b.lat},${b.lng}&dirflg=d`;
   return `<div class="actions"><button type="button" class="btn primary drive" data-drive="${b.i}">Drive here</button><a class="btn" href="${g}" target="_blank" rel="noopener">Google Maps</a>${isApple ? `<a class="btn" href="${a}" target="_blank" rel="noopener">Apple Maps</a>` : ""}</div>
-    <p class="hint">Drive here keeps the parking tags on screen while you drive, with spoken turns and the closest other places if this one is taken.</p>`;
+    <p class="hint">Drive here keeps the parking tags on screen while you drive. If the bay is taken, one tap on "Taken? Next bay" takes you to the closest other one.</p>`;
 }
 
 function closedLines(b) {

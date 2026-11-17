@@ -56,3 +56,13 @@ test("fetchRoute turns an OSRM answer into coords and steps with distances", asy
   assert.equal(r.steps[1].at, 700);
   await assert.rejects(N.fetchRoute([0, 0], [0, 0], async () => ({ ok: true, json: async () => ({ code: "NoRoute" }) })));
 });
+
+test("the voice picker prefers a smooth female English voice, Australian first", () => {
+  const v = (name, lang) => ({ name, lang });
+  const voices = [v("Microsoft David - English (United States)", "en-US"), v("Google UK English Female", "en-GB"),
+    v("Microsoft Natasha Online (Natural) - English (Australia)", "en-AU"), v("Microsoft Linh", "vi-VN")];
+  assert.equal(N.pickVoice(voices).name, "Microsoft Natasha Online (Natural) - English (Australia)");
+  assert.equal(N.pickVoice([v("Karen", "en-AU"), v("Daniel", "en-GB")]).name, "Karen");
+  assert.equal(N.pickVoice([v("Daniel", "en-GB"), v("Some Voice", "en-AU")]).name, "Some Voice");
+  assert.equal(N.pickVoice([v("Linh", "vi-VN")]), null);
+});

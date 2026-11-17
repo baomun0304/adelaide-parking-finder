@@ -68,6 +68,7 @@
   }
 
   const distText = (m) => (m < 50 ? "now" : m < 950 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`);
+  const awayText = (m) => (m < 950 ? `${Math.max(10, Math.round(m / 10) * 10)} m` : `${(m / 1000).toFixed(1)} km`);
   const minutesText = (s) => (s < 60 ? "under 1 min" : `${Math.round(s / 60)} min`);
 
   // Steps with the distance at which each manoeuvre happens, counted from the start of the route.
@@ -80,6 +81,23 @@
   function nextStep(points, along) {
     for (let i = 1; i < points.length; i++) if (points[i].at > along - 15) return { step: points[i], toGo: Math.max(0, points[i].at - along) };
     return { step: points[points.length - 1], toGo: 0 };
+  }
+
+  // The browser's default voice is often a flat, robotic one. Prefer the smooth "natural" or
+  // well-known female English voices that phones and computers ship with, Australian first.
+  const GOOD_VOICES = [
+    /natasha.*natural/i, /libby.*natural/i, /sonia.*natural/i, /aria.*natural/i, /jenny.*natural/i, /(natural|neural).*female/i,
+    /google uk english female/i, /google us english/i,
+    /^karen/i, /^catherine/i, /^samantha/i, /^serena/i, /^moira/i, /^tessa/i, /^martha/i,
+    /natasha/i, /libby/i, /sonia/i, /aria/i, /jenny/i, /zira/i, /hazel/i, /susan/i, /female/i,
+  ];
+  function pickVoice(voices) {
+    const english = voices.filter((v) => /^en[-_]/i.test(v.lang || ""));
+    for (const pattern of GOOD_VOICES) {
+      const hits = english.filter((v) => pattern.test(v.name));
+      if (hits.length) return hits.find((v) => /AU/i.test(v.lang)) || hits.find((v) => /GB/i.test(v.lang)) || hits[0];
+    }
+    return english.find((v) => /AU/i.test(v.lang)) || english[0] || null;
   }
 
   async function fetchRoute(from, to, fetchImpl = fetch) {
@@ -130,12 +148,21 @@
         : { type: "FeatureCollection", features: [] });
     }
 
+    // Voices arrive late on some browsers, so look again when the list changes.
+    let voice = null;
+    const loadVoice = () => { voice = pickVoice(speechSynthesis.getVoices()); };
+    if ("speechSynthesis" in window) { loadVoice(); speechSynthesis.addEventListener?.("voiceschanged", loadVoice); }
+
     function speak(text) {
       if (muted || !("speechSynthesis" in window)) return;
       try {
         speechSynthesis.cancel();
         const u = new SpeechSynthesisUtterance(text);
-        u.lang = "en-AU";
+        if (!voice) loadVoice();
+        if (voice) u.voice = voice;
+        u.lang = voice?.lang || "en-AU";
+        u.rate = 1.0;
+        u.pitch = 1.05;
         speechSynthesis.speak(u);
       } catch { /* no voice on this device: the banner still shows it */ }
     }
@@ -162,7 +189,7 @@
       const arrive = new Date(Date.now() + secs * 1000).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit", timeZone: "Australia/Adelaide" });
       const backups = ctx.nearestMatches(state.bay, 99).filter((x) => x.d <= NEARBY_M).length;
       $("nav-eta").textContent = `${minutesText(secs)} · ${distText(left).replace("now", "0 m")} · arrive ${arrive}`;
-      $("nav-backup").textContent = backups ? `${backups} more matching ${backups === 1 ? "place" : "places"} within ${NEARBY_M} m of your bay, in case it is taken.` : "No other matching places close to this bay.";
+      $("nav-backup").textContent = backups ? `${backups} other matching ${backups === 1 ? "place" : "places"} within ${NEARBY_M} m of your bay.` : "No other matching places close to this bay.";
     }
 
     function follow(lat, lng, heading, speed) {
@@ -190,8 +217,8 @@
 
     function arrive() {
       state.arrived = true;
-      speak("You have arrived. If the bay is taken, other places are listed on screen.");
-      const others = ctx.nearestMatches(state.bay, 4).filter((x) => x.b !== state.bay).slice(0, 3);
+      speak("You have arrived. If it's taken, tap Taken, next bay.");
+      const others = ctx.nearestMatches(state.bay, 20).filter((x) => !state.tried.has(x.b.i)).slice(0, 3);
       $("nav-arrival").innerHTML = `
         <p class="nav-arrived">You're at your bay.</p>
         <p class="nav-sub">${others.length ? "Taken? These are the closest other places that match your filters:" : "Taken? Nothing else close matches your filters. Try fewer filters."}</p>
@@ -221,6 +248,7 @@
         return;
       }
       const next = nextStep(state.route.steps, where.along);
+      updateTakenButton();
       renderBanner(next);
       renderBar(where.along);
       const key = `${next.step.at}`;
@@ -231,10 +259,31 @@
       follow(lat, lng, pos.coords.heading, pos.coords.speed || 0);
     }
 
-    async function start(bay) {
+    // The closest place that suits the filters and has not been tried on this trip.
+    function nextBay() {
+      return ctx.nearestMatches(state.bay, 40).find(({ b }) => !state.tried.has(b.i)) || null;
+    }
+
+    function updateTakenButton() {
+      const next = state && nextBay();
+      $("nav-taken").disabled = !next;
+      $("nav-taken").textContent = next ? `Taken? Next bay, ${awayText(next.d)}` : "Taken? No other bay near";
+    }
+
+    function takeNext() {
+      if (!state) return;
+      const next = nextBay();
+      if (!next) { ctx.flash("No other matching place close by. Try fewer filters."); return; }
+      speak(`Okay. Going to the next closest bay, ${awayText(next.d).replace(" m", " metres").replace(" km", " kilometres")} away.`);
+      start(next.b, state.tried);
+    }
+
+    async function start(bay, tried = new Set()) {
       const fix = ctx.getFix();
       ctx.startWatching();
-      state = { bay, route: null, offCount: 0, lastReroute: Date.now(), spoken: new Set(), arrived: false, following: true };
+      tried.add(bay.i);
+      state = { bay, tried, route: null, offCount: 0, lastReroute: Date.now(), spoken: new Set(), arrived: false, following: true };
+      updateTakenButton();
       $("nav-arrival").hidden = true;
       $("nav-recentre").hidden = true;
       $("nav-backup").hidden = false;
@@ -243,6 +292,7 @@
       routeLayer();
       keepAwake(true);
       $("nav-mute").setAttribute("aria-pressed", muted);
+      $("nav-mute").textContent = muted ? "Voice off" : "Mute voice";
       if (!fix) {
         $("nav-text").textContent = "Waiting for your location...";
         state.waitingForFix = true;
@@ -278,10 +328,12 @@
     }
 
     $("nav-end").onclick = stop;
+    $("nav-taken").onclick = takeNext;
     $("nav-mute").onclick = () => {
       muted = !muted;
       try { localStorage.setItem(MUTE_KEY, muted ? "1" : "0"); } catch { /* private mode */ }
       $("nav-mute").setAttribute("aria-pressed", muted);
+      $("nav-mute").textContent = muted ? "Voice off" : "Mute voice";
       if (muted && "speechSynthesis" in window) speechSynthesis.cancel();
     };
     $("nav-recentre").onclick = () => { if (!state) return; state.following = true; $("nav-recentre").hidden = true; const f = ctx.getFix(); if (f) follow(f[0], f[1], null, 0); };
@@ -289,7 +341,7 @@
       const row = e.target.closest("[data-nav-bay]");
       if (!row) return;
       const bay = ctx.bayById(Number(row.dataset.navBay));
-      start(bay);
+      start(bay, state ? state.tried : new Set());
     });
     ctx.map.on("dragstart", () => { if (state) { state.following = false; $("nav-recentre").hidden = false; } });
     ctx.map.on("style.load", routeLayer);
@@ -301,6 +353,6 @@
     };
   }
 
-  return { metres, nearestOnLine, stepText, stepIcon, distText, stepPoints, nextStep, fetchRoute, create,
+  return { metres, nearestOnLine, stepText, stepIcon, distText, stepPoints, nextStep, fetchRoute, create, pickVoice,
     OFF_ROUTE_M, ARRIVED_M };
 });
