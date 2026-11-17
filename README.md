@@ -1,5 +1,7 @@
 # Adelaide Parking Finder
 
+[![CI](https://github.com/baomun0304/adelaide-parking-finder/actions/workflows/ci.yml/badge.svg)](https://github.com/baomun0304/adelaide-parking-finder/actions/workflows/ci.yml)
+
 A phone-first map of every on-street parking bay in the Adelaide CBD, built so a driver can glance at it and know where they can park right now.
 
 Live: https://adelaide-parking-finder.vercel.app (open it on your phone, or add it to the home screen)
@@ -15,10 +17,11 @@ Live: https://adelaide-parking-finder.vercel.app (open it on your phone, or add 
 ## What it does
 
 - Shows free (time limited), ticket, unrestricted, motorcycle, disabled, residential, taxi, loading and no-parking bays. Each map tag copies the real sign, so a 2 hour bay reads **2P**.
-- Tap a bay to see what applies at that moment, for example "Ticket, 2 hours max, until 6pm", when you need to move the car, and when the rules change soon. One tap opens directions in Google Maps (or Apple Maps on an iPhone).
+- Tap a bay to see what applies at that moment, for example "Ticket, 2 hours max, until 6pm", when you need to move the car, and when the rules change soon. Google Maps and Apple Maps links are there too.
+- **Drive here**: turn-by-turn directions inside the app, so the parking tags stay on the map the whole way. A turn banner, spoken turns (with mute), the map turning with the car, a new route if you go another way, and a closer zoom near the bay so each tag shows. If the bay is taken, one tap on **Taken? Next bay** drives you to the closest other place that suits your filters; on arrival it also lists the nearest backups.
 - **Search** a street or place and the map jumps to it.
 - **Filters** answer the questions a driver actually has:
-  - *How long do you need?* 30 min, 1 hr, 2 hr, 3 hr, 4 hr or all day. The limit is checked against the time you would spend inside each sign's hours, so a 2 hour bay that stops applying at 6pm still counts for a longer stay that starts at 5pm.
+  - *How long do you need?* Any, 1 hr, 2 hr, 4 hr or all day in one tap, plus 30 min and 3 hr under More. The limit is checked against the time you would spend inside each sign's hours, so a 2 hour bay that stops applying at 6pm still counts for a longer stay that starts at 5pm.
   - *Free only* hides bays where you would have to pay during your stay.
   - *When*: now, or any day and time in the coming week.
   - *Vehicle*: car, motorbike or disability permit. You only see bays you can legally use.
@@ -78,14 +81,14 @@ python -m http.server 5190    # then open http://localhost:5190
 
 ```bash
 cd sync && python -m unittest -v      # sign reading, data build
-node --test tests/logic.test.js       # time, rules, filters (Node 20 or newer)
+node --test tests/logic.test.js tests/nav.test.js   # time, rules, filters, route maths (Node 20 or newer)
 ```
 
 CI runs both on every push (`.github/workflows/ci.yml`).
 
 ## Data
 
-Parking data: City of Adelaide, licensed CC BY 4.0 (data.sa.gov.au, "On-Street Parking Zones"). Base map: OpenFreeMap, OpenMapTiles, OpenStreetMap contributors. Search: OpenStreetMap Nominatim (what you type is sent to them, only when you press search). This is an independent project, not affiliated with the council. Always follow the sign on the street.
+Parking data: City of Adelaide, licensed CC BY 4.0 (data.sa.gov.au, "On-Street Parking Zones"). Base map: OpenFreeMap, OpenMapTiles, OpenStreetMap contributors. Search: OpenStreetMap Nominatim (what you type is sent to them, only when you press search). Directions: the FOSSGIS OSRM service at routing.openstreetmap.de (Drive here sends your position and the bay's position to it, only when you use it). This is an independent project, not affiliated with the council. Always follow the sign on the street.
 
 ## License
 
