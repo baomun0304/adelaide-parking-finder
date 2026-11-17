@@ -1,11 +1,11 @@
 "use strict";
 // Keeps the app, the parking data and the map tiles you've looked at, so it still opens with no signal.
 // Pages and data go to the network first (so they are never stale when you're online); tiles are cached first.
-const VERSION = "apf-v4";
+const VERSION = "apf-v5";
 const TILES = "apf-tiles";
 const MAX_TILES = 600;
 const SHELL = [
-  "/", "/style.css", "/app.js", "/logic.js", "/manifest.webmanifest",
+  "/", "/style.css", "/app.js", "/logic.js", "/nav.js", "/manifest.webmanifest",
   "/vendor/maplibre-gl.js", "/vendor/maplibre-gl.css",
   "/icons/icon-192.png", "/data/parking.geojson", "/data/status.json",
 ];

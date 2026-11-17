@@ -544,7 +544,8 @@ const isApple = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platf
 function directionsHtml(b) {
   const g = `https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lng}&travelmode=driving`;
   const a = `https://maps.apple.com/?daddr=${b.lat},${b.lng}&dirflg=d`;
-  return `<div class="actions"><a class="btn primary" href="${g}" target="_blank" rel="noopener">Directions in Google Maps</a>${isApple ? `<a class="btn" href="${a}" target="_blank" rel="noopener">Apple Maps</a>` : ""}</div>`;
+  return `<div class="actions"><button type="button" class="btn primary drive" data-drive="${b.i}">Drive here</button><a class="btn" href="${g}" target="_blank" rel="noopener">Google Maps</a>${isApple ? `<a class="btn" href="${a}" target="_blank" rel="noopener">Apple Maps</a>` : ""}</div>
+    <p class="hint">Drive here keeps the parking tags on screen while you drive, with spoken turns and the closest other places if this one is taken.</p>`;
 }
 
 function closedLines(b) {
@@ -635,6 +636,8 @@ function openList(from) {
 sheetBody.addEventListener("click", (e) => {
   const row = e.target.closest("[data-bay]");
   if (row) { openBay(bays[Number(row.dataset.bay)], $("list-btn")); return; }
+  const drive = e.target.closest("[data-drive]");
+  if (drive) { nav.start(bays[Number(drive.dataset.drive)]); return; }
   onFilterClick(e);
   if (e.target.id === "w-go" || e.target.id === "w-skip") closeSheet();
 });
@@ -665,7 +668,7 @@ function aboutHtml() {
       <li>Outside the hours on a sign, a bay usually has no limit. Public holidays and event days can be different, and signs change. The sign on the street always wins.</li>
       ${readable != null ? `<li>We can read the hours on <b>${readable}%</b> of the ${nf.format(timed)} free and ticket bays. The rest say "Check the sign" instead of guessing.</li>` : ""}
       ${checked ? `<li>Data checked ${esc(checked)}${updated ? `, last changed ${esc(updated)}` : ""}. It updates once a day.</li>` : ""}
-      <li>Your location stays on your phone. Search sends what you type to OpenStreetMap's Nominatim service.</li>
+      <li>Your location stays on your phone. Search sends what you type to OpenStreetMap's Nominatim service. Drive here sends your position and the bay's to the FOSSGIS routing service (routing.openstreetmap.de) to work out the way.</li>
     </ul>
   </details>
   <p class="fine">Parking data: City of Adelaide, CC BY 4.0. Map: OpenFreeMap, OpenMapTiles, OpenStreetMap contributors; satellite imagery Esri. An independent project, not affiliated with the council. <a href="${REPO}/issues" target="_blank" rel="noopener">Report a wrong bay</a>.</p>`;
@@ -787,8 +790,9 @@ function onFix(pos) {
     dot.className = "me";
     me = new maplibregl.Marker({ element: dot }).setLngLat([lastFix[1], lastFix[0]]).addTo(map);
   } else me.setLngLat([lastFix[1], lastFix[0]]);
-  if (follow || firstFix) toMe();
+  if (!nav.active && (follow || firstFix)) toMe(); // while driving, the directions decide where the map looks
   if (sheetKind === "list") renderList();
+  nav.onFix(pos);
 }
 
 function onFixError(err) {
@@ -914,6 +918,38 @@ async function load() {
   updateChrome();
   renderBanner();
 }
+
+// ---------- driving directions inside the app ----------
+
+const nav = Nav.create({
+  map, esc, flash, startWatching, pinHtml,
+  getFix: () => lastFix,
+  bayById: (i) => bays[i],
+  describe: (b) => Logic.describe(b, moment(), !filters.later),
+  // Other matching places, closest to the given bay first.
+  // Backups only count if you could park there right now, and are not the same spot you can already see.
+  nearestMatches: (bay, n) => matched
+    .filter((b) => {
+      if (b === bay) return false;
+      const now = Logic.describe(b, Logic.adelaideNow(), true);
+      return now.tone !== "no" && !(filters.free && now.blocksFree);
+    })
+    .map((b) => ({ b, d: metres(bay.lat, bay.lng, b.lat, b.lng) }))
+    .filter((x) => x.d > 30)
+    .sort((x, y) => x.d - y.d)
+    .slice(0, n),
+  onNavChange(active, bay) {
+    if (active) {
+      if (sheetKind) closeSheet();
+      setFollow(false);
+      toggleLayersMenu(false);
+      foldMore();
+    }
+    picked = active && bay ? bay.i : null;
+    markPicked();
+    setPanelHeight();
+  },
+});
 
 syncLayersMenu();
 showMore(DESKTOP.matches);

@@ -93,6 +93,22 @@
   <div id="more" class="more" hidden></div>
 </section>
 
+<section id="nav-top" class="nav-top" aria-live="polite" aria-label="Next turn">
+  <div id="nav-arrow" class="nav-arrow"></div>
+  <div class="nav-words"><div id="nav-dist" class="nav-dist"></div><div id="nav-text" class="nav-text"></div></div>
+</section>
+<section id="nav-bottom" class="nav-bottom" aria-label="Trip">
+  <div id="nav-arrival" class="nav-arrival" hidden></div>
+  <p id="nav-eta" class="nav-eta"></p>
+  <p id="nav-backup" class="nav-backup"></p>
+  <div class="nav-actions">
+    <button type="button" id="nav-recentre" class="btn" hidden>Re-centre</button>
+    <button type="button" id="nav-mute" class="btn" aria-pressed="false">Mute voice</button>
+    <button type="button" id="nav-end" class="btn end">End</button>
+  </div>
+  <p class="nav-safety">Set it up before you drive, and keep your eyes on the road. Routing: FOSSGIS, OSRM, OpenStreetMap.</p>
+</section>
+
 <section id="sheet" class="sheet" role="dialog" aria-labelledby="sheet-title" hidden>
   <div class="sheet-grip" aria-hidden="true"></div>
   <button class="sheet-close" aria-label="Close">&times;</button>
@@ -101,6 +117,7 @@
 
 <script src="vendor/maplibre-gl.js"></script>
 <script src="logic.js"></script>
+<script src="nav.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

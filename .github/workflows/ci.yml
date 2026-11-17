@@ -21,4 +21,4 @@ jobs:
         working-directory: sync
         run: python -m unittest -v
       - name: Logic tests
-        run: node --test tests/logic.test.js
+        run: node --test tests/logic.test.js tests/nav.test.js

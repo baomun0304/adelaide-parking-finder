@@ -366,3 +366,39 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 [tabindex="-1"]:focus { outline: none; }
 .more-legend { margin: 12px 0 0; font-weight: 700; }
+
+/* driving directions: a turn banner on top, the trip at the bottom, parking tags in between */
+.nav-top, .nav-bottom { display: none; }
+body.navigating .nav-top, body.navigating .nav-bottom { display: flex; }
+body.navigating .panel, body.navigating .topbar, body.navigating .tools > :not(#locate-btn) { display: none; }
+body.navigating .tools { top: calc(var(--gap) + 120px + env(safe-area-inset-top)); }
+.nav-top {
+  position: fixed; z-index: 1050; left: var(--gap); right: var(--gap); top: calc(var(--gap) + env(safe-area-inset-top));
+  align-items: center; gap: 14px; padding: 14px 16px; border-radius: 18px;
+  background: #0f5b2e; color: #fff; box-shadow: var(--shadow);
+}
+.nav-arrow svg { width: 56px; height: 56px; fill: none; stroke: #fff; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; display: block; }
+.nav-words { min-width: 0; }
+.nav-dist { font: 800 28px/1.05 var(--sign); }
+.nav-text { font-size: 18px; font-weight: 700; line-height: 1.25; }
+.nav-bottom {
+  position: fixed; z-index: 1050; left: 0; right: 0; bottom: 0; flex-direction: column; gap: 6px;
+  padding: 14px var(--gap) calc(12px + env(safe-area-inset-bottom));
+  background: var(--card); border-radius: 20px 20px 0 0; box-shadow: 0 -8px 30px -10px rgba(0, 0, 0, .35);
+  max-height: 70vh; max-height: 70dvh; overflow: auto;
+}
+.nav-eta { margin: 0; font-size: 18px; font-weight: 700; }
+.nav-backup { margin: 0; color: var(--muted); font-size: 14px; }
+.nav-actions { display: flex; gap: 8px; margin-top: 4px; }
+.nav-actions .btn { flex: 1; }
+.nav-actions .btn[aria-pressed="true"] { background: var(--paper); }
+.nav-actions .btn.end { background: var(--red); border-color: var(--red); color: #fff; }
+.nav-safety { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+.nav-arrival[hidden], .nav-actions .btn[hidden], .nav-backup[hidden] { display: none; }
+.nav-arrived { margin: 0; font-size: 22px; font-weight: 800; color: var(--green); }
+.nav-sub { margin: 2px 0 6px; color: var(--muted); font-size: 14px; }
+.actions .btn.drive { flex: 1.4; }
+@media (min-width: 900px) {
+  .nav-top { left: var(--gap); right: auto; width: 420px; }
+  .nav-bottom { left: var(--gap); right: auto; bottom: var(--gap); width: 420px; border-radius: 20px; }
+}
