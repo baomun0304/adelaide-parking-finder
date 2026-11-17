@@ -13,6 +13,8 @@
   const ANNOUNCE_AT_M = 200;  // say the next turn this far ahead
   const NEARBY_M = 250;       // "other places near your bay"
   const CLOSE_M = 500;        // from here on, zoom in far enough to see each bay's own tag
+  const TURN_NOW_M = 40;      // say the turn again this close to it
+  const WAIT_FOR_FIX_MS = 20000;
 
   const R = 6371000;
   const rad = (d) => (d * Math.PI) / 180;
@@ -51,7 +53,8 @@
     if (m.type === "arrive") return "You have arrived at your bay";
     if (m.type === "depart") return step.name ? `Head off along ${step.name}` : "Head off";
     if (m.type === "roundabout" || m.type === "rotary") return `At the roundabout, take exit ${m.exit || 1}${onto}`;
-    if (m.type === "continue" || m.type === "new name") return step.name ? `Continue onto ${step.name}` : "Continue";
+    const turns = m.modifier && m.modifier !== "straight";
+    if ((m.type === "continue" || m.type === "new name") && !turns) return step.name ? `Continue onto ${step.name}` : "Continue";
     return `${TURN[m.modifier] || "Continue"}${onto}`;
   }
 
@@ -85,20 +88,22 @@
 
   // The browser's default voice is often a flat, robotic one. Prefer the smooth "natural" or
   // well-known female English voices that phones and computers ship with, Australian first.
-  const GOOD_VOICES = [
-    /natasha.*natural/i, /libby.*natural/i, /sonia.*natural/i, /aria.*natural/i, /jenny.*natural/i, /(natural|neural).*female/i,
-    /google uk english female/i, /google us english/i,
-    /^karen/i, /^catherine/i, /^samantha/i, /^serena/i, /^moira/i, /^tessa/i, /^martha/i,
-    /natasha/i, /libby/i, /sonia/i, /aria/i, /jenny/i, /zira/i, /hazel/i, /susan/i, /female/i,
-  ];
+  // Natural (neural) voices sound best by far, so they win first; after that any known pleasant
+  // female voice, Australian before British before the rest.
+  const NATURAL = [/\b(natasha|libby|sonia|aria|jenny|ava|emma)\b.*\b(natural|neural)\b/i, /\b(natural|neural)\b.*\bfemale\b/i];
+  const NICE = [/google uk english female/i, /google us english/i, /\bkaren\b/i, /\bcatherine\b/i, /\bsamantha\b/i, /\bserena\b/i,
+    /\bmoira\b/i, /\btessa\b/i, /\bmartha\b/i, /\bnatasha\b/i, /\blibby\b/i, /\bsonia\b/i, /\baria\b/i, /\bjenny\b/i,
+    /\bzira\b/i, /\bhazel\b/i, /\bsusan\b/i, /\bfemale\b/i];
+  const byRegion = (list) => list.find((v) => /AU/i.test(v.lang)) || list.find((v) => /GB/i.test(v.lang)) || list[0];
   function pickVoice(voices) {
-    const english = voices.filter((v) => /^en[-_]/i.test(v.lang || ""));
-    for (const pattern of GOOD_VOICES) {
-      const hits = english.filter((v) => pattern.test(v.name));
-      if (hits.length) return hits.find((v) => /AU/i.test(v.lang)) || hits.find((v) => /GB/i.test(v.lang)) || hits[0];
+    const english = voices.filter((v) => /^en(\b|[-_])/i.test(v.lang || ""));
+    for (const group of [NATURAL, NICE]) {
+      const hits = english.filter((v) => group.some((re) => re.test(v.name)));
+      if (hits.length) return group === NATURAL ? byRegion(hits.sort((a, b) => indexIn(group, a) - indexIn(group, b) || 0)) : byRegion(hits.sort((a, b) => indexIn(group, a) - indexIn(group, b)).filter((v, i, all) => /AU/i.test(v.lang) || !all.some((x) => /AU/i.test(x.lang))));
     }
-    return english.find((v) => /AU/i.test(v.lang)) || english[0] || null;
+    return byRegion(english) || null;
   }
+  const indexIn = (group, v) => group.findIndex((re) => re.test(v.name));
 
   async function fetchRoute(from, to, fetchImpl = fetch) {
     const url = `${ROUTER}${from[1]},${from[0]};${to[1]},${to[0]}?overview=full&geometries=geojson&steps=true`;
@@ -153,10 +158,11 @@
     const loadVoice = () => { voice = pickVoice(speechSynthesis.getVoices()); };
     if ("speechSynthesis" in window) { loadVoice(); speechSynthesis.addEventListener?.("voiceschanged", loadVoice); }
 
-    function speak(text) {
+    // urgent lines (the turn right now) cut in; everything else waits its turn so nothing is lost
+    function speak(text, urgent = false) {
       if (muted || !("speechSynthesis" in window)) return;
       try {
-        speechSynthesis.cancel();
+        if (urgent) speechSynthesis.cancel();
         const u = new SpeechSynthesisUtterance(text);
         if (!voice) loadVoice();
         if (voice) u.voice = voice;
@@ -178,7 +184,7 @@
     function renderBanner(next) {
       const icon = stepIcon(next.step);
       $("nav-arrow").innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ARROWS[icon]}</svg>`;
-      $("nav-dist").textContent = next.step.maneuver?.type === "arrive" ? distText(next.toGo) : distText(next.toGo);
+      $("nav-dist").textContent = state?.arrived ? "" : distText(next.toGo);
       $("nav-text").textContent = stepText(next.step);
     }
 
@@ -187,8 +193,8 @@
       const left = Math.max(0, r.distance - along);
       const secs = r.distance ? r.duration * (left / r.distance) : 0;
       const arrive = new Date(Date.now() + secs * 1000).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit", timeZone: "Australia/Adelaide" });
-      const backups = ctx.nearestMatches(state.bay, 99).filter((x) => x.d <= NEARBY_M).length;
-      $("nav-eta").textContent = `${minutesText(secs)} · ${distText(left).replace("now", "0 m")} · arrive ${arrive}`;
+      const backups = backupsFor().filter((x) => x.d <= NEARBY_M).length;
+      $("nav-eta").textContent = state.arrived ? "You're here." : `${minutesText(secs)} · ${awayText(left)} · arrive ${arrive}`;
       $("nav-backup").textContent = backups ? `${backups} other matching ${backups === 1 ? "place" : "places"} within ${NEARBY_M} m of your bay.` : "No other matching places close to this bay.";
     }
 
@@ -203,26 +209,46 @@
       ctx.map.easeTo(opts);
     }
 
-    async function plan(bay, from) {
+    function backupsFor() {
+      if (!state.backups || Date.now() - state.backupsAt > 60000) {
+        state.backups = ctx.nearestMatches(state.bay, 200);
+        state.backupsAt = Date.now();
+      }
+      return state.backups;
+    }
+
+    // Returns false when the trip changed while the route was loading (Taken, End or a new Drive here).
+    async function plan(trip, from) {
       $("nav-text").textContent = "Finding the way...";
       $("nav-dist").textContent = "";
-      const route = await fetchRoute(from, [bay.lat, bay.lng]);
-      if (!state || state.bay !== bay) return;
+      const route = await fetchRoute(from, [trip.bay.lat, trip.bay.lng]);
+      if (state !== trip) return false;
       state.route = route;
       state.spoken = new Set();
       state.offCount = 0;
       drawRoute();
       onFix({ coords: { latitude: from[0], longitude: from[1], heading: null, speed: 0 } });
+      return true;
+    }
+
+    function announceStart(trip) {
+      if (state === trip && !trip.arrived) speak(`Starting. ${stepText(trip.route.steps[1] || trip.route.steps[0])}`);
+    }
+
+    function failed(trip) {
+      if (state !== trip) return; // an old request: the newer trip carries on
+      stop();
+      ctx.flash("Couldn't work out directions right now. Try Google Maps from the bay details.");
     }
 
     function arrive() {
       state.arrived = true;
-      speak("You have arrived. If it's taken, tap Taken, next bay.");
-      const others = ctx.nearestMatches(state.bay, 20).filter((x) => !state.tried.has(x.b.i)).slice(0, 3);
+      speak("You have arrived. If it's taken, tap Taken, next bay.", true);
+      const others = backupsFor().filter((x) => !state.tried.has(x.b.i)).slice(0, 3);
       $("nav-arrival").innerHTML = `
         <p class="nav-arrived">You're at your bay.</p>
         <p class="nav-sub">${others.length ? "Taken? These are the closest other places that match your filters:" : "Taken? Nothing else close matches your filters. Try fewer filters."}</p>
-        <ol class="near">${others.map(({ b, d }) => `<li><button type="button" data-nav-bay="${b.i}">${ctx.pinHtml(b)}<span class="near-text"><b>${ctx.esc(ctx.describe(b).head)}</b><span>${ctx.esc(ctx.describe(b).sub)}</span></span><span class="near-d">${distText(d).replace("now", "here")}</span></button></li>`).join("")}</ol>`;
+        <ol class="near">${others.map(({ b, d }) => `<li><button type="button" data-nav-bay="${b.i}">${ctx.pinHtml(b)}<span class="near-text"><b>${ctx.esc(ctx.describe(b).head)}</b><span>${ctx.esc(ctx.describe(b).sub)}</span></span><span class="near-d">${awayText(d)}</span></button></li>`).join("")}</ol>`;
       $("nav-arrival").hidden = false;
     }
 
@@ -239,29 +265,38 @@
         follow(lat, lng, null, 0);
         return;
       }
+      // Starting in a car park or a park, the line begins at the nearest road: only count "off route"
+      // once the car has reached the line, or the app would keep asking for the same route.
+      if (where.off <= OFF_ROUTE_M) state.joined = true;
       // Off the line twice in a row: ask for a fresh route from here (at most every 10 seconds).
-      state.offCount = where.off > OFF_ROUTE_M ? state.offCount + 1 : 0;
+      state.offCount = state.joined && where.off > OFF_ROUTE_M ? state.offCount + 1 : 0;
       if (state.offCount >= 2 && Date.now() - state.lastReroute > REROUTE_GAP_MS) {
         state.lastReroute = Date.now();
+        state.joined = false;
         speak("Finding a new route");
-        plan(state.bay, [lat, lng]).catch(() => ctx.flash("Couldn't find a new route. Keep going, we'll try again."));
+        const trip = state;
+        plan(trip, [lat, lng]).catch(() => { if (state === trip) ctx.flash("Couldn't find a new route. Keep going, we'll try again."); });
         return;
       }
       const next = nextStep(state.route.steps, where.along);
       updateTakenButton();
       renderBanner(next);
       renderBar(where.along);
-      const key = `${next.step.at}`;
-      if (next.toGo <= ANNOUNCE_AT_M && !state.spoken.has(key)) {
+      // Two announcements per turn: about 200 m before, and again at the turn.
+      const isBay = next.step.maneuver?.type === "arrive";
+      const phase = next.toGo < TURN_NOW_M ? "now" : next.toGo <= ANNOUNCE_AT_M ? "far" : null;
+      const key = `${next.step.at}:${phase}`;
+      if (phase && !state.spoken.has(key) && !(isBay && phase === "now")) {
         state.spoken.add(key);
-        speak(next.toGo < 50 ? stepText(next.step) : `In ${distText(next.toGo)}, ${stepText(next.step).toLowerCase()}`);
+        if (phase === "now") speak(stepText(next.step), true);
+        else speak(isBay ? `Your bay is ${awayText(next.toGo).replace(" m", " metres")} ahead.` : `In ${awayText(next.toGo).replace(" m", " metres")}, ${stepText(next.step).toLowerCase()}`);
       }
       follow(lat, lng, pos.coords.heading, pos.coords.speed || 0);
     }
 
     // The closest place that suits the filters and has not been tried on this trip.
     function nextBay() {
-      return ctx.nearestMatches(state.bay, 40).find(({ b }) => !state.tried.has(b.i)) || null;
+      return backupsFor().find(({ b }) => !state.tried.has(b.i)) || null;
     }
 
     function updateTakenButton() {
@@ -274,7 +309,7 @@
       if (!state) return;
       const next = nextBay();
       if (!next) { ctx.flash("No other matching place close by. Try fewer filters."); return; }
-      speak(`Okay. Going to the next closest bay, ${awayText(next.d).replace(" m", " metres").replace(" km", " kilometres")} away.`);
+      speak(`Okay. Going to the next closest bay, ${awayText(next.d).replace(" m", " metres").replace(" km", " kilometres")} away.`, true);
       start(next.b, state.tried);
     }
 
@@ -282,7 +317,8 @@
       const fix = ctx.getFix();
       ctx.startWatching();
       tried.add(bay.i);
-      state = { bay, tried, route: null, offCount: 0, lastReroute: Date.now(), spoken: new Set(), arrived: false, following: true };
+      const trip = { bay, tried, route: null, offCount: 0, lastReroute: Date.now(), spoken: new Set(), arrived: false, following: true, joined: false };
+      state = trip;
       updateTakenButton();
       $("nav-arrival").hidden = true;
       $("nav-recentre").hidden = true;
@@ -291,19 +327,19 @@
       ctx.onNavChange(true, bay);
       routeLayer();
       keepAwake(true);
-      $("nav-mute").setAttribute("aria-pressed", muted);
-      $("nav-mute").textContent = muted ? "Voice off" : "Mute voice";
+      syncMute();
       if (!fix) {
         $("nav-text").textContent = "Waiting for your location...";
-        state.waitingForFix = true;
+        trip.waitingForFix = true;
+        setTimeout(() => {
+          if (state === trip && trip.waitingForFix) { stop(); ctx.flash("Couldn't find your location. Check that location is on, then try again."); }
+        }, WAIT_FOR_FIX_MS);
         return;
       }
       try {
-        await plan(bay, fix);
-        speak(`Starting. ${stepText(state.route.steps[1] || state.route.steps[0])}`);
+        if (await plan(trip, fix)) announceStart(trip);
       } catch {
-        stop();
-        ctx.flash("Couldn't work out directions right now. Try Google Maps from the bay details.");
+        failed(trip);
       }
     }
 
@@ -314,17 +350,24 @@
       $("nav-arrival").hidden = true;
       keepAwake(false);
       if ("speechSynthesis" in window) speechSynthesis.cancel();
-      ctx.map.easeTo({ pitch: 0, bearing: 0, duration: 600 });
       ctx.onNavChange(false);
+      // Level the map at once: the panel coming back resizes the map, and a resize would cancel an animation.
+      ctx.map.jumpTo({ pitch: 0, bearing: 0 });
     }
 
     // First fix after "Drive here" without a location yet.
     function onFirstFix(pos) {
       if (!state?.waitingForFix) return;
-      state.waitingForFix = false;
-      plan(state.bay, [pos.coords.latitude, pos.coords.longitude])
-        .then(() => speak(`Starting. ${stepText(state.route.steps[1] || state.route.steps[0])}`))
-        .catch(() => { stop(); ctx.flash("Couldn't work out directions right now. Try Google Maps from the bay details."); });
+      const trip = state;
+      trip.waitingForFix = false;
+      plan(trip, [pos.coords.latitude, pos.coords.longitude])
+        .then((ok) => { if (ok) announceStart(trip); })
+        .catch(() => failed(trip));
+    }
+
+    function syncMute() {
+      $("nav-mute").setAttribute("aria-pressed", muted);
+      $("nav-mute").textContent = muted ? "Unmute voice" : "Mute voice";
     }
 
     $("nav-end").onclick = stop;
@@ -332,8 +375,7 @@
     $("nav-mute").onclick = () => {
       muted = !muted;
       try { localStorage.setItem(MUTE_KEY, muted ? "1" : "0"); } catch { /* private mode */ }
-      $("nav-mute").setAttribute("aria-pressed", muted);
-      $("nav-mute").textContent = muted ? "Voice off" : "Mute voice";
+      syncMute();
       if (muted && "speechSynthesis" in window) speechSynthesis.cancel();
     };
     $("nav-recentre").onclick = () => { if (!state) return; state.following = true; $("nav-recentre").hidden = true; const f = ctx.getFix(); if (f) follow(f[0], f[1], null, 0); };
@@ -343,12 +385,18 @@
       const bay = ctx.bayById(Number(row.dataset.navBay));
       start(bay, state ? state.tried : new Set());
     });
-    ctx.map.on("dragstart", () => { if (state) { state.following = false; $("nav-recentre").hidden = false; } });
+    // Looking around (drag or a pinch zoom by hand) stops following until Re-centre.
+    const lookAround = (e) => { if (state && (e.type === "dragstart" || e.originalEvent)) { state.following = false; $("nav-recentre").hidden = false; } };
+    for (const ev of ["dragstart", "zoomstart", "pitchstart", "rotatestart"]) ctx.map.on(ev, lookAround);
     ctx.map.on("style.load", routeLayer);
 
     return {
       start, stop, routeLayer,
       onFix(pos) { if (!state) return; if (state.waitingForFix) onFirstFix(pos); else onFix(pos); },
+      // Location refused while driving: there is nothing to follow, so end the trip and say why.
+      onLocationError(code) { if (state && code === 1) { stop(); ctx.flash("Location is blocked, so directions can't follow you. Allow it in your browser settings."); } },
+      // iOS only speaks after a tap has started speech once, so the Drive here tap primes it silently.
+      primeVoice() { try { if (!muted && "speechSynthesis" in window) speechSynthesis.speak(new SpeechSynthesisUtterance("")); } catch { /* fine */ } },
       get active() { return !!state; },
     };
   }

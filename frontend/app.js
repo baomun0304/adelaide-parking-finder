@@ -58,7 +58,7 @@ const tileZoom = () => map.getZoom() + ZOOM_SHIFT;
 function mapPadding() {
   if (DESKTOP.matches) return { left: 404, right: 70, top: 20, bottom: 20 };
   const covered = sheetKind ? sheet.offsetHeight : $("panel").offsetHeight;
-  return { left: 0, right: 0, top: 80, bottom: Math.min(covered, innerHeight * 0.75) };
+  return { left: 0, right: 0, top: 80, bottom: Math.min(covered, innerHeight - 200) }; // always 120 px of map in view
 }
 const lookAt = (lat, lng, zoom) => map.easeTo({ center: [lng, lat], zoom: zoom - ZOOM_SHIFT, duration: 600, padding: mapPadding() });
 
@@ -105,6 +105,8 @@ systemDark.addEventListener?.("change", () => { if (!store.get(THEME_KEY)) apply
 
 // ---- the map-style menu: one button instead of three
 function syncLayersMenu() {
+  const tilt = $("layers-menu").querySelector('[data-layer="tilt"]');
+  tilt.textContent = satellite ? "3D tilt" : "3D buildings"; // satellite photos have no building shapes to raise
   for (const b of $("layers-menu").querySelectorAll("[data-layer]")) {
     const on = { map: !satellite, satellite, tilt: tilted, dark: shownTheme === "dark" }[b.dataset.layer];
     b.setAttribute("aria-checked", on);
@@ -304,7 +306,9 @@ function applyFilters() {
   const m = moment();
   const stops = filters.allKinds ? bays.filter(Logic.isStopZone) : [];
   const usable = bays.filter((b) => Logic.canPark(b, filters.vehicle));
-  matched = (isFiltering() ? usable.filter((b) => Logic.matches(b, filters, m)) : usable).concat(stops);
+  // With no time filter, still leave out bays that are a loading zone or no stopping right now.
+  const open = (b) => Logic.describe(b, m, !filters.later).tone !== "no";
+  matched = (isFiltering() ? usable.filter((b) => Logic.matches(b, filters, m)) : usable.filter(open)).concat(stops);
   const key = `${started}|${matched.map((b) => b.i).join(",")}`;
   if (key !== matchedKey) { // the 30 second clock usually changes nothing, so the map is left alone
     matchedKey = key;
@@ -408,6 +412,7 @@ function syncFilters() {
 }
 
 function showMore(open) {
+  document.body.classList.toggle("more-open", open);
   $("more").hidden = !open;
   $("more-btn").setAttribute("aria-expanded", open);
   if (!open) $("more").scrollTop = 0;
@@ -474,11 +479,13 @@ const sheetBody = $("sheet-body");
 let sheetKind = null;
 let opener = null;
 
-function openSheet(kind, html, { focus = true, from = null, modal = false } = {}) {
+function openSheet(kind, html, { focus = true, from = null, modal = false, quiet = false } = {}) {
   const wasOpen = !sheet.hidden && !sheet.classList.contains("closing");
+  // The 30 second clock re-opens the same bay: if nothing changed, leave it alone so focus and scroll stay put.
+  if (quiet && wasOpen && sheetKind === kind && sheetBody.dataset.html === html) return;
   sheetKind = kind;
   sheetBody.innerHTML = html;
-  delete sheetBody.dataset.html;
+  sheetBody.dataset.html = html;
   sheet.setAttribute("aria-modal", modal);
   sheet.dataset.kind = kind;
   if (from) opener = from;
@@ -487,8 +494,11 @@ function openSheet(kind, html, { focus = true, from = null, modal = false } = {}
     sheet.classList.add("closing");
     requestAnimationFrame(() => requestAnimationFrame(() => sheet.classList.remove("closing")));
   }
-  sheet.scrollTop = 0;
+  if (!quiet) sheet.scrollTop = 0;
   if (focus) $("sheet-title")?.focus({ preventScroll: true });
+  // A modal sheet (the welcome question) keeps keyboard focus inside it.
+  for (const id of ["map", "panel"]) $(id).inert = modal;
+  for (const el of document.querySelectorAll(".topbar, .tools")) el.inert = modal;
 }
 
 function closeSheet() {
@@ -499,7 +509,10 @@ function closeSheet() {
   setTimeout(() => { if (sheet.classList.contains("closing")) { sheet.hidden = true; setPanelHeight(); } }, 300);
   picked = null;
   markPicked();
+  for (const id of ["map", "panel"]) $(id).inert = false;
+  for (const el of document.querySelectorAll(".topbar, .tools")) el.inert = false;
   if (opener && document.contains(opener)) opener.focus({ preventScroll: true });
+  else if (document.activeElement === document.body || sheet.contains(document.activeElement)) map.getCanvas().focus({ preventScroll: true });
   opener = null;
   if (wasWelcome) startMap();
 }
@@ -591,7 +604,7 @@ function openBay(b, from, quiet = false) {
     ${directionsHtml(b)}
     <ul class="facts">${facts.map(([k, v]) => `<li><span>${k}</span><span>${esc(v)}</span></li>`).join("")}</ul>
     <p class="fine">Always read the sign at the bay too. Event days, works and public holidays can change the rules. <a href="${reportUrl(b, d)}" target="_blank" rel="noopener">${d.unknown ? "Know what this sign says? Tell us" : "Wrong? Report this bay"}</a>.</p>`,
-  { focus: !quiet, from });
+  { focus: !quiet, from, quiet });
   // Keep the tapped bay in sight above the sheet.
   if (!quiet) requestAnimationFrame(() => lookAt(b.lat, b.lng, Math.max(tileZoom(), 16)));
 }
@@ -637,7 +650,7 @@ sheetBody.addEventListener("click", (e) => {
   const row = e.target.closest("[data-bay]");
   if (row) { openBay(bays[Number(row.dataset.bay)], $("list-btn")); return; }
   const drive = e.target.closest("[data-drive]");
-  if (drive) { nav.start(bays[Number(drive.dataset.drive)]); return; }
+  if (drive) { nav.primeVoice(); nav.start(bays[Number(drive.dataset.drive)]); return; }
   onFilterClick(e);
   if (e.target.id === "w-go" || e.target.id === "w-skip") closeSheet();
 });
@@ -692,8 +705,8 @@ function openWelcome() {
   openSheet("welcome", `
     <h2 id="sheet-title" class="sheet-title" tabindex="-1">How long do you need to park?</h2>
     <p class="sheet-lead">We'll show only the bays that let you stay that long, starting now.</p>
-    <div class="big-opts" role="group" aria-label="How long">${optButtons("need", WELCOME_NEEDS, "big-opt")}</div>
     <button type="button" class="opt free-opt" data-set="free" aria-pressed="false">Free only</button>
+    <div class="big-opts" role="group" aria-label="How long">${optButtons("need", WELCOME_NEEDS, "big-opt")}</div>
     <p class="hint">Change this any time in the panel at the bottom. Search for a street or use your location from the top of the map.</p>
     <div class="sheet-actions sticky">
       <button type="button" id="w-skip" class="btn">Skip</button>
@@ -706,7 +719,7 @@ function openWelcome() {
 
 setInterval(() => {
   if (!bays.length) return;
-  if (!filters.later && isFiltering()) applyFilters(); else updateChrome();
+  if (!filters.later) applyFilters(); else updateChrome(); // rules change with the clock, filtered or not
   if (sheetKind === "bay" && picked != null) openBay(bays[picked], null, true);
 }, 30000);
 
@@ -788,6 +801,8 @@ function onFix(pos) {
   if (!me) {
     const dot = document.createElement("div");
     dot.className = "me";
+    dot.setAttribute("role", "img");
+    dot.setAttribute("aria-label", "Your location");
     me = new maplibregl.Marker({ element: dot }).setLngLat([lastFix[1], lastFix[0]]).addTo(map);
   } else me.setLngLat([lastFix[1], lastFix[0]]);
   if (!nav.active && (follow || firstFix)) toMe(); // while driving, the directions decide where the map looks
@@ -797,6 +812,7 @@ function onFix(pos) {
 
 function onFixError(err) {
   $("locate-btn").classList.remove("busy");
+  nav.onLocationError(err.code);
   if (err.code === 1) {
     watching = false;
     setFollow(false);
@@ -928,16 +944,17 @@ const nav = Nav.create({
   describe: (b) => Logic.describe(b, moment(), !filters.later),
   // Other matching places, closest to the given bay first.
   // Backups only count if you could park there right now, and are not the same spot you can already see.
-  nearestMatches: (bay, n) => matched
-    .filter((b) => {
-      if (b === bay) return false;
-      const now = Logic.describe(b, Logic.adelaideNow(), true);
-      return now.tone !== "no" && !(filters.free && now.blocksFree);
-    })
-    .map((b) => ({ b, d: metres(bay.lat, bay.lng, b.lat, b.lng) }))
-    .filter((x) => x.d > 30)
-    .sort((x, y) => x.d - y.d)
-    .slice(0, n),
+  // Distance first (cheap), then the rule check only for the closest few hundred (it is the slow part).
+  nearestMatches: (bay, n) => {
+    const now = Logic.adelaideNow();
+    return matched
+      .map((b) => ({ b, d: metres(bay.lat, bay.lng, b.lat, b.lng) }))
+      .filter((x) => x.b !== bay && x.d > 30)
+      .sort((x, y) => x.d - y.d)
+      .slice(0, n * 3)
+      .filter(({ b }) => { const say = Logic.describe(b, now, true); return say.tone !== "no" && !(filters.free && say.blocksFree); })
+      .slice(0, n);
+  },
   onNavChange(active, bay) {
     if (active) {
       if (sheetKind) closeSheet();

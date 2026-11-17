@@ -149,7 +149,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .status-actions button { padding: 6px 0; border: 0; background: none; font-weight: 700; color: var(--blue); text-decoration: underline; text-underline-offset: 3px; }
 .panel-q { display: flex; align-items: center; gap: 10px; }
 .q-label { flex: none; font-weight: 700; font-size: 14px; }
-.quick { flex: 1; display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.opts.quick { flex: 1; display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
 .quick .opt { padding: 0 4px; min-width: 0; }
 .panel-row { display: flex; gap: 8px; }
 .panel-row .opt { flex: 1; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -186,7 +186,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .pin-free { color: #0f7a3d; }
 .pin-ticket { color: #1f4fd1; }
-.pin-ticket i::before { content: "$"; color: #fff; }
+.pin-ticket i::before { content: "$"; color: #fff; font-size: 9px; }
 .pin-ticket i { font-size: 0; }
 .pin-unrestricted { color: #fff; background: #0f7a3d; border-color: #0f7a3d; font-size: 16px; }
 .pin-special { color: #4b34b0; }
@@ -343,7 +343,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   font-size: 18px; font-weight: 700;
 }
 .big-opt[aria-pressed="true"] { background: var(--green); border-color: var(--green); color: var(--on-green); }
-.free-opt { width: 100%; margin-top: 12px; min-height: 52px; font-size: 17px; }
+.free-opt { width: 100%; margin: 0 0 12px; min-height: 52px; font-size: 17px; }
 .sheet-actions.sticky {
   position: sticky; bottom: 0; margin: 16px -20px 0;
   padding: 12px 20px; background: var(--card); border-top: 1px solid var(--line);
@@ -404,3 +404,18 @@ body.navigating .tools { top: calc(var(--gap) + 120px + env(safe-area-inset-top)
   .nav-top { left: var(--gap); right: auto; width: 420px; }
   .nav-bottom { left: var(--gap); right: auto; bottom: var(--gap); width: 420px; border-radius: 20px; }
 }
+
+/* small phones: everything in the panel still fits on one line */
+@media (max-width: 360px) {
+  .panel-q { gap: 6px; }
+  .q-label { font-size: 13px; }
+  .quick .opt, .panel-row .opt { font-size: 14px; padding: 0 4px; }
+  .panel-row { gap: 6px; }
+}
+/* a bay sheet on a phone leaves the map in view above it */
+@media (max-width: 899px) { .sheet[data-kind="bay"] { max-height: 62vh; max-height: 62dvh; } }
+/* with the extra filters open on a short screen, the panel wins over the corner buttons */
+@media (max-height: 760px) and (max-width: 899px) { body.more-open .tools { display: none; } }
+/* the red End button keeps readable white text in dark mode */
+:root[data-theme="dark"] .nav-actions .btn.end { background: #b3261e; border-color: #b3261e; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .nav-actions .btn.end { background: #b3261e; border-color: #b3261e; } }
